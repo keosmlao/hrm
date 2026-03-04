@@ -19,7 +19,7 @@ export default function LogoutButton() {
     <button
       onClick={handleLogout}
       disabled={isLoading}
-      className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20 disabled:cursor-wait disabled:opacity-70"
+      className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/60 bg-white/60 px-3 py-2 text-sm font-medium text-slate-500 backdrop-blur transition-all hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-wait disabled:opacity-70"
     >
       <svg
         aria-hidden="true"

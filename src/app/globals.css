@@ -49,3 +49,45 @@ select,
 textarea {
   font-size: 16px;
 }
+
+/* Aurora Theme Animations */
+@keyframes aurora-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(40px, -30px) scale(1.08); }
+  50% { transform: translate(-20px, 20px) scale(0.95); }
+  75% { transform: translate(30px, 10px) scale(1.04); }
+}
+
+@keyframes aurora-drift-reverse {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(-30px, 20px) scale(1.05); }
+  50% { transform: translate(25px, -15px) scale(0.97); }
+  75% { transform: translate(-15px, -25px) scale(1.03); }
+}
+
+@keyframes aurora-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.aurora-page .aurora-blob-1 {
+  animation: aurora-drift 22s ease-in-out infinite;
+}
+
+.aurora-page .aurora-blob-2 {
+  animation: aurora-drift-reverse 26s ease-in-out infinite;
+}
+
+.aurora-page .aurora-blob-3 {
+  animation: aurora-drift 30s ease-in-out infinite;
+  animation-delay: -10s;
+}
+
+.aurora-page .aurora-blob-4 {
+  animation: aurora-drift-reverse 24s ease-in-out infinite;
+  animation-delay: -6s;
+}
+
+.aurora-page .aurora-pulse {
+  animation: aurora-pulse 2.5s ease-in-out infinite;
+}

@@ -115,7 +115,7 @@ export default async function StaffEvaluationPage() {
     const posNotIn = posCode === "11" ? ["11"] : ["11", "12"];
     const teamRows: { employee_code: string; fullname_lo: string }[] = await prisma.odg_employee.findMany({
       where: {
-        OR: [{ department_code: emp.department_code }, { unit_code: emp.unit_code }],
+        department_code: emp.department_code,
         employee_code: { not: emp.employee_code },
         employment_status: "ACTIVE",
         position_code: { notIn: posNotIn },

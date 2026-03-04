@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
       const [team, assignedRows] = await Promise.all([
         prisma.odg_employee.findMany({
           where: {
-            OR: [{ department_code: departmentCode }, { unit_code: unitCode }],
+            department_code: departmentCode,
             employee_code: { not: empCode },
             employment_status: 'ACTIVE',
             position_code: { notIn: posNotIn },
@@ -206,7 +206,8 @@ export async function POST(request: NextRequest) {
     const unitCode = session.employee.unitCode;
 
     if (targetCode !== empCode) {
-      const isManager = ["11", "12"].includes(session.employee.positionCode);
+      const posCode = session.employee.positionCode;
+      const isManager = ["11", "12"].includes(posCode);
       if (!isManager) {
         return NextResponse.json(
           { error: "ທ່ານບໍ່ມີສິດປະເມີນຜູ້ອື່ນ" },
@@ -214,16 +215,22 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // ກວດວ່າ target ແມ່ນລູກທີມ (ພະແນກ/ໜ່ວຍງານດຽວກັນ, ຕຳແໜ່ງຕ່ຳກ່ວາ, ACTIVE)
+      const posNotIn = posCode === "11" ? ["11"] : ["11", "12"];
       const teamCheck = await prisma.odg_employee.findFirst({
         where: {
           employee_code: targetCode,
-          OR: [{ department_code: departmentCode }, { unit_code: unitCode }],
+          department_code: departmentCode,
+          employment_status: "ACTIVE",
+          position_code: { notIn: posNotIn },
         },
         select: { employee_code: true },
       });
+
       if (teamCheck) {
         evalType = "manager";
       } else {
+        // ກວດວ່າ target ຖືກ assign ມາ
         const assignCheck = await prisma.odg_staff_eval_assignment.findFirst({
           where: { evaluator_code: empCode, target_code: targetCode, year },
         });

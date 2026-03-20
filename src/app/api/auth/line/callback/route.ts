@@ -1,22 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import pool from "@/lib/server/db";
+import { setSessionCookie } from "@/lib/server/session";
 import { verifyLineOAuthState } from "@/lib/line-oauth-state";
 import { getPublicOrigin, getPublicUrl, isLocalHost } from "@/lib/public-url";
+import type { SessionData } from "@/lib/types";
 
-interface LineTokenResponse {
-  access_token: string;
-  token_type: string;
-  refresh_token: string;
-  expires_in: number;
-  scope: string;
-  id_token?: string;
-}
+const LINE_PLACEHOLDER_VALUES = new Set([
+  "your_line_channel_id",
+  "your_line_channel_secret",
+  "your_line_callback_url",
+]);
 
-interface LineProfile {
-  userId: string;
-  displayName: string;
-  pictureUrl?: string;
-  statusMessage?: string;
+function isConfiguredValue(value: string | undefined) {
+  if (!value) return false;
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 && !LINE_PLACEHOLDER_VALUES.has(trimmedValue);
 }
 
 function getCallbackUrl(request: NextRequest) {
@@ -27,7 +25,11 @@ function getCallbackUrl(request: NextRequest) {
     return new URL("/api/auth/line/callback", publicOrigin).toString();
   }
 
-  return process.env.LINE_CALLBACK_URL || new URL("/api/auth/line/callback", publicOrigin).toString();
+  if (isConfiguredValue(process.env.LINE_CALLBACK_URL)) {
+    return process.env.LINE_CALLBACK_URL!;
+  }
+
+  return new URL("/api/auth/line/callback", publicOrigin).toString();
 }
 
 export async function GET(request: NextRequest) {
@@ -42,18 +44,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(getPublicUrl(request, "/login?error=access_denied"));
   }
 
-  if (!channelId || !channelSecret) {
+  if (!isConfiguredValue(channelId) || !isConfiguredValue(channelSecret)) {
     return NextResponse.redirect(getPublicUrl(request, "/login?error=config_missing"));
   }
 
-  if (!state || !verifyLineOAuthState(state, channelSecret)) {
+  if (!state || !verifyLineOAuthState(state, channelSecret!)) {
     return NextResponse.redirect(getPublicUrl(request, "/login?error=invalid_state"));
   }
 
   try {
     const callbackUrl = getCallbackUrl(request);
-
-    // Exchange code for access token
     const tokenResponse = await fetch("https://api.line.me/oauth2/v2.1/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -61,8 +61,8 @@ export async function GET(request: NextRequest) {
         grant_type: "authorization_code",
         code,
         redirect_uri: callbackUrl,
-        client_id: channelId,
-        client_secret: channelSecret,
+        client_id: channelId!,
+        client_secret: channelSecret!,
       }),
     });
 
@@ -70,9 +70,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(getPublicUrl(request, "/login?error=token_failed"));
     }
 
-    const tokenData: LineTokenResponse = await tokenResponse.json();
-
-    // Get user profile from LINE
+    const tokenData = await tokenResponse.json() as { access_token: string };
     const profileResponse = await fetch("https://api.line.me/v2/profile", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
@@ -81,15 +79,32 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(getPublicUrl(request, "/login?error=profile_failed"));
     }
 
-    const profile: LineProfile = await profileResponse.json();
+    const profile = await profileResponse.json() as {
+      userId: string;
+      displayName: string;
+      pictureUrl?: string;
+    };
 
-    // Look up employee by LINE user ID
-    const employee = await prisma.odg_employee.findFirst({
-      where: { line_id: profile.userId },
-    });
+    let employee = null;
+    try {
+      const { rows } = await pool.query(
+        "SELECT * FROM odg_employee WHERE line_id = $1 LIMIT 1",
+        [profile.userId]
+      );
+      employee = rows[0] || null;
+    } catch (err: unknown) {
+      const errorCode =
+        err && typeof err === "object" && "code" in err ? String(err.code) : null;
 
-    // Store session with employee info
-    const sessionData = {
+      if (errorCode === "ENOTFOUND" || errorCode === "ECONNREFUSED") {
+        console.error("LINE callback database connection error:", err);
+        return NextResponse.redirect(getPublicUrl(request, "/login?error=db_unreachable"));
+      }
+
+      throw err;
+    }
+
+    const sessionData: SessionData = {
       lineUserId: profile.userId,
       lineDisplayName: profile.displayName,
       linePictureUrl: profile.pictureUrl || null,
@@ -113,19 +128,7 @@ export async function GET(request: NextRequest) {
     };
 
     const response = NextResponse.redirect(getPublicUrl(request, "/home"));
-
-    response.cookies.set(
-      "session",
-      Buffer.from(JSON.stringify(sessionData)).toString("base64"),
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 7, // 7 days
-        path: "/",
-      }
-    );
-
+    setSessionCookie(response, sessionData);
     return response;
   } catch (err) {
     console.error("LINE callback error:", err);

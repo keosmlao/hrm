@@ -1,184 +1,107 @@
-import Link from "next/link";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import prisma from "@/lib/prisma";
-import AppLogo from "@/components/app-logo";
-import OrgTree from "./org-tree";
+"use client";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/api";
+import OrgTree from "@/components/org-tree";
+import type { OrgDivision, OrgDepartment, OrgUnit, OrgEmployee } from "@/components/org-tree";
+import { AppShell, GlassPanel, HeaderIconTile, PageHero, PageLoading, PageMetric } from "@/components/app-shell";
 
-interface SessionData {
-  lineUserId: string;
-  lineDisplayName: string;
-  linePictureUrl: string | null;
-  employee: {
-    divisionCode: string;
-  } | null;
-}
+export default function OrgChartPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [divisions, setDivisions] = useState<OrgDivision[]>([]);
 
-export interface OrgEmployee {
-  employee_code: string;
-  title_lo: string | null;
-  fullname_lo: string;
-  position_code: string;
-  position_name_lo: string;
-  department_code: string | null;
-  unit_code: string | null;
-}
+  useEffect(() => {
+    apiFetch<{ divisions: unknown[]; departments: unknown[]; units: unknown[]; employees: unknown[] }>("/page-data/org-chart")
+      .then((data) => {
+        const allEmployees: OrgEmployee[] = (data.employees as Record<string, unknown>[]).map((e) => ({
+          employee_code: e.employee_code as string,
+          title_lo: e.title_lo as string | null,
+          fullname_lo: e.fullname_lo as string,
+          position_code: (e.position_code as string) ?? "",
+          division_code: e.division_code as string,
+          department_code: e.department_code as string | null,
+          unit_code: e.unit_code as string | null,
+          position_name_lo: (e.position_name_lo as string) ?? "",
+        }));
 
-export interface OrgUnit {
-  unit_code: string;
-  unit_name_lo: string;
-  employees: OrgEmployee[];
-}
+        const unitRows = data.units as Record<string, string>[];
+        const deptRows = data.departments as Record<string, string>[];
+        const divRows = data.divisions as Record<string, string>[];
 
-export interface OrgDepartment {
-  department_code: string;
-  department_name_lo: string;
-  units: OrgUnit[];
-  employees: OrgEmployee[]; // employees without unit
-  employeeCount: number;
-}
-
-export interface OrgDivision {
-  division_code: string;
-  division_name_lo: string;
-  departments: OrgDepartment[];
-  employeeCount: number;
-}
-
-async function getSession(): Promise<SessionData | null> {
-  const cookieStore = await cookies();
-  const session = cookieStore.get("session");
-  if (!session) return null;
-  try {
-    return JSON.parse(Buffer.from(session.value, "base64").toString());
-  } catch {
-    return null;
-  }
-}
-
-export default async function OrgChartPage() {
-  const session = await getSession();
-
-  if (!session) {
-    redirect("/login");
-  }
-
-  // ດຶງ division_code ຂອງພະນັກງານທີ່ login
-  const myDivisionCode =
-    session.employee?.divisionCode ??
-    (
-      await prisma.odg_employee.findFirst({
-        where: { line_id: session.lineUserId },
-        select: { division_code: true },
+        const tree: OrgDivision[] = divRows.map((div) => {
+          const departments: OrgDepartment[] = deptRows
+            .filter((d) => d.division_code === div.division_code)
+            .map((dept) => {
+              const units: OrgUnit[] = unitRows
+                .filter((u) => u.department_code === dept.department_code)
+                .map((unit) => ({
+                  unit_code: unit.unit_code,
+                  unit_name_lo: unit.unit_name_lo,
+                  employees: allEmployees.filter((e) => e.unit_code === unit.unit_code),
+                }));
+              const deptEmployees = allEmployees.filter(
+                (e) => e.department_code === dept.department_code && (!e.unit_code || !unitRows.some((u) => u.unit_code === e.unit_code))
+              );
+              const employeeCount = deptEmployees.length + units.reduce((sum, u) => sum + u.employees.length, 0);
+              return { department_code: dept.department_code, department_name_lo: dept.department_name_lo, units, employees: deptEmployees, employeeCount };
+            });
+          const employeeCount = departments.reduce((sum, d) => sum + d.employeeCount, 0);
+          return { division_code: div.division_code, division_name_lo: div.division_name_lo, departments, employeeCount };
+        });
+        setDivisions(tree);
       })
-    )?.division_code ??
-    undefined;
+      .catch(() => router.replace("/login"))
+      .finally(() => setLoading(false));
+  }, [router]);
 
-  // Fetch org data ສະເພາະຝ່າຍຂອງຕົນເອງ
-  const [divRows, deptRows, unitRows, empRows] = await Promise.all([
-    prisma.odg_division.findMany({
-      where: { is_active: true, division_code: myDivisionCode },
-    }),
-    prisma.odg_department.findMany({
-      where: { is_active: true, division_code: myDivisionCode },
-      orderBy: { department_code: "asc" },
-    }),
-    prisma.odg_unit.findMany({
-      where: {
-        is_active: true,
-        odg_department: { division_code: myDivisionCode },
-      },
-      orderBy: { unit_code: "asc" },
-    }),
-    prisma.odg_employee.findMany({
-      where: { employment_status: "ACTIVE", division_code: myDivisionCode },
-      include: { odg_position_rel: { select: { position_name_lo: true } } },
-      orderBy: [{ position_code: "asc" }, { fullname_lo: "asc" }],
-    }),
-  ]);
+  if (loading) return <PageLoading />;
 
-  const allEmployees = empRows.map((e) => ({
-    employee_code: e.employee_code,
-    title_lo: e.title_lo,
-    fullname_lo: e.fullname_lo,
-    position_code: e.position_code ?? "",
-    division_code: e.division_code,
-    department_code: e.department_code,
-    unit_code: e.unit_code,
-    position_name_lo: e.odg_position_rel?.position_name_lo ?? "",
-  }));
-
-  // Build tree structure
-  const divisions: OrgDivision[] = divRows.map((div) => {
-    const departments: OrgDepartment[] = deptRows
-      .filter((d) => d.division_code === div.division_code)
-      .map((dept) => {
-        const units: OrgUnit[] = unitRows
-          .filter((u) => u.department_code === dept.department_code)
-          .map((unit) => ({
-            unit_code: unit.unit_code,
-            unit_name_lo: unit.unit_name_lo,
-            employees: allEmployees.filter(
-              (e) => e.unit_code === unit.unit_code
-            ),
-          }));
-
-        // Employees directly under department (no unit)
-        const deptEmployees = allEmployees.filter(
-          (e) =>
-            e.department_code === dept.department_code &&
-            (!e.unit_code ||
-              !unitRows.some((u) => u.unit_code === e.unit_code))
-        );
-
-        const employeeCount =
-          deptEmployees.length +
-          units.reduce((sum, u) => sum + u.employees.length, 0);
-
-        return {
-          department_code: dept.department_code,
-          department_name_lo: dept.department_name_lo,
-          units,
-          employees: deptEmployees,
-          employeeCount,
-        };
-      });
-
-    const employeeCount = departments.reduce(
-      (sum, d) => sum + d.employeeCount,
-      0
-    );
-
-    return {
-      division_code: div.division_code,
-      division_name_lo: div.division_name_lo,
-      departments,
-      employeeCount,
-    };
-  });
+  const totalDepartments = divisions.reduce((sum, division) => sum + division.departments.length, 0);
+  const totalUnits = divisions.reduce(
+    (sum, division) =>
+      sum + division.departments.reduce((deptSum, department) => deptSum + department.units.length, 0),
+    0
+  );
+  const totalEmployees = divisions.reduce((sum, division) => sum + division.employeeCount, 0);
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,var(--brand-50)_0%,#ffffff_100%)]">
-      <nav className="bg-brand-700 text-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-3">
-            <AppLogo className="shrink-0" />
-            <h1 className="text-lg font-bold leading-tight text-white sm:text-xl">
-              ໂຄງສ້າງອົງກອນ
-            </h1>
+    <AppShell
+      title="ໂຄງສ້າງອົງກອນ"
+      description="ເບິ່ງຜັງອົງກອນ ແລະ ຄວາມສຳພັນຂອງແຕ່ລະສາຍງານ"
+      icon={<HeaderIconTile accent="amber"><HierarchyIcon className="h-5 w-5" /></HeaderIconTile>}
+      containerClassName="max-w-7xl"
+    >
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Organization Map"
+          title="ໂຄງສ້າງທັງອົງກອນໃນມຸມມອງດຽວ"
+          description="ສະແດງ division, department, unit ແລະ ພະນັກງານໃນຮູບແບບທີ່ອ່ານງ່າຍຂຶ້ນ ສຳລັບ desktop ແລະ mobile."
+          badge="Live Structure"
+          accent="amber"
+        >
+          <div className="grid gap-3 sm:grid-cols-3">
+            <PageMetric label="Divisions" value={divisions.length} tone="amber" />
+            <PageMetric label="Departments / Units" value={`${totalDepartments} / ${totalUnits}`} tone="blue" />
+            <PageMetric label="Employees" value={totalEmployees} tone="teal" />
           </div>
-          <Link
-            href="/home"
-            className="self-stretch rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-white/20 sm:self-auto"
-          >
-            ກັບໜ້າຫຼັກ
-          </Link>
-        </div>
-      </nav>
+        </PageHero>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <OrgTree divisions={divisions} />
-      </main>
-    </div>
+        <GlassPanel className="px-4 py-5 sm:px-6">
+          <OrgTree divisions={divisions} />
+        </GlassPanel>
+      </div>
+    </AppShell>
+  );
+}
+
+function HierarchyIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="7" y="2" width="6" height="4" rx="1" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="1.5" y="13" width="6" height="4" rx="1" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="12.5" y="13" width="6" height="4" rx="1" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M10 6v3m0 0H4.5m5.5 0h5.5m-11 0v4m11-4v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
   );
 }

@@ -27,10 +27,8 @@ export function getPublicOrigin(request: Request) {
     return `${protocol}://${forwardedHost}`;
   }
 
-  if (process.env.NODE_ENV === "production") {
-    if (!isLocalHost(requestUrl.hostname)) {
-      return configuredOrigin || `https://${requestUrl.host}`;
-    }
+  if (process.env.NODE_ENV === "production" && !isLocalHost(requestUrl.hostname)) {
+    return configuredOrigin || `https://${requestUrl.host}`;
   }
 
   return requestUrl.origin;

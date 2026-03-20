@@ -1,165 +1,146 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import prisma from "@/lib/prisma";
+import pool from "@/lib/server/db";
+import { getSession } from "@/lib/server/session";
+import { jsonError } from "@/lib/server/http";
+import type { SessionData } from "@/lib/types";
 
-interface SessionData {
-  lineUserId: string;
-  employee: {
-    employeeCode: string;
-    positionCode: string;
-    departmentCode: string;
-    unitCode: string;
-  } | null;
+function requireManager(session: SessionData) {
+  return !!session.employee && ["11", "12"].includes(session.employee.positionCode);
 }
 
-async function getSession(): Promise<SessionData | null> {
-  const cookieStore = await cookies();
-  const session = cookieStore.get("session");
-  if (!session) return null;
-  try {
-    return JSON.parse(Buffer.from(session.value, "base64").toString());
-  } catch {
-    return null;
-  }
-}
-
-/** GET — ລາຍຊື່ assignment ທີ່ມີ + ລາຍຊື່ຄົນທີ່ເລືອກໄດ້ */
 export async function GET() {
   const session = await getSession();
   if (!session?.employee) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonError("Unauthorized", 401);
+  }
+  if (!requireManager(session)) {
+    return jsonError("ສະເພາະຫົວໜ້າ/ຜູ້ຈັດການ", 403);
   }
 
-  const emp = session.employee;
-  const isManager = ["11", "12"].includes(emp.positionCode);
-  if (!isManager) {
-    return NextResponse.json({ error: "ສະເພາະຫົວໜ້າ/ຜູ້ຈັດການ" }, { status: 403 });
-  }
-
+  const employee = session.employee;
   const year = String(new Date().getFullYear());
 
   try {
-    const posNotIn = emp.positionCode === "11" ? ["11"] : ["11", "12"];
+    const posNotIn = employee.positionCode === "11" ? ["11"] : ["11", "12"];
+    const { rows: assignmentRows } = await pool.query(
+      "SELECT * FROM odg_staff_eval_assignment WHERE evaluator_code = $1 AND year = $2 ORDER BY id ASC",
+      [employee.employeeCode, year]
+    );
+    const assignedCodes = assignmentRows.map((assignment: { target_code: string }) => assignment.target_code);
 
-    const assignmentRows = await prisma.odg_staff_eval_assignment.findMany({
-      where: { evaluator_code: emp.employeeCode, year },
-      orderBy: { id: "asc" },
-    });
+    let assignedEmployees: Record<string, unknown>[] = [];
+    if (assignedCodes.length > 0) {
+      const { rows } = await pool.query(
+        `SELECT e.*, p.position_name_lo, d.department_name_lo
+         FROM odg_employee e
+         LEFT JOIN odg_position p ON e.position_code = p.position_code
+         LEFT JOIN odg_department d ON e.department_code = d.department_code
+         WHERE e.employee_code = ANY($1)`,
+        [assignedCodes]
+      );
+      assignedEmployees = rows;
+    }
 
-    const assignedCodes = assignmentRows.map((a) => a.target_code);
+    const { rows: candidateRows } = await pool.query(
+      `SELECT e.employee_code, e.fullname_lo, e.position_code, p.position_name_lo, e.department_code, d.department_name_lo
+       FROM odg_employee e
+       LEFT JOIN odg_position p ON e.position_code = p.position_code
+       LEFT JOIN odg_department d ON e.department_code = d.department_code
+       WHERE e.employee_code != $1
+         AND NOT (e.employee_code = ANY($2))
+         AND e.employment_status = 'ACTIVE'
+         AND NOT (e.position_code = ANY($3))
+       ORDER BY e.position_code ASC, e.fullname_lo ASC`,
+      [employee.employeeCode, assignedCodes.length > 0 ? assignedCodes : ["__none__"], posNotIn]
+    );
 
-    const [assignedEmps, candidateRows] = await Promise.all([
-      assignedCodes.length > 0
-        ? prisma.odg_employee.findMany({
-            where: { employee_code: { in: assignedCodes } },
-            include: { odg_position_rel: true, odg_department_rel: true },
-          })
-        : Promise.resolve([]),
-      prisma.odg_employee.findMany({
-        where: {
-          employee_code: { not: emp.employeeCode, notIn: assignedCodes },
-          employment_status: "ACTIVE",
-          position_code: { notIn: posNotIn },
-        },
-        include: { odg_position_rel: true, odg_department_rel: true },
-        orderBy: [{ position_code: "asc" }, { fullname_lo: "asc" }],
-      }),
-    ]);
-    const empMap = new Map(assignedEmps.map((e) => [e.employee_code, e]));
+    const employeeMap = new Map(
+      assignedEmployees.map((assignedEmployee) => [assignedEmployee.employee_code, assignedEmployee])
+    );
 
-    const assigned = assignmentRows.map((a) => {
-      const e = empMap.get(a.target_code);
+    const assigned = assignmentRows.map((assignment: Record<string, unknown>) => {
+      const assignedEmployee = employeeMap.get(assignment.target_code as string) as
+        | Record<string, unknown>
+        | undefined;
+
       return {
-        id: a.id,
-        target_code: a.target_code,
-        fullname_lo: e?.fullname_lo ?? null,
-        position_code: e?.position_code ?? null,
-        position_name_lo: e?.odg_position_rel?.position_name_lo ?? null,
-        department_code: e?.department_code ?? null,
-        department_name_lo: e?.odg_department_rel?.department_name_lo ?? null,
+        id: assignment.id,
+        target_code: assignment.target_code,
+        fullname_lo: assignedEmployee?.fullname_lo ?? null,
+        position_code: assignedEmployee?.position_code ?? null,
+        position_name_lo: assignedEmployee?.position_name_lo ?? null,
+        department_code: assignedEmployee?.department_code ?? null,
+        department_name_lo: assignedEmployee?.department_name_lo ?? null,
       };
     });
 
-    const candidates = candidateRows.map((e) => ({
-      employee_code: e.employee_code,
-      fullname_lo: e.fullname_lo,
-      position_code: e.position_code,
-      position_name_lo: e.odg_position_rel?.position_name_lo ?? null,
-      department_code: e.department_code,
-      department_name_lo: e.odg_department_rel?.department_name_lo ?? null,
-    }));
-
-    return NextResponse.json({ assigned, candidates });
+    return NextResponse.json({ assigned, candidates: candidateRows });
   } catch (err) {
     console.error("Failed to fetch assignments:", err);
-    return NextResponse.json({ error: "ເກີດຂໍ້ຜິດພາດ" }, { status: 500 });
+    return jsonError("ເກີດຂໍ້ຜິດພາດ", 500);
   }
 }
 
-/** POST — ເພີ່ມ assignment */
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session?.employee) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonError("Unauthorized", 401);
   }
-
-  const emp = session.employee;
-  const isManager = ["11", "12"].includes(emp.positionCode);
-  if (!isManager) {
-    return NextResponse.json({ error: "ສະເພາະຫົວໜ້າ/ຜູ້ຈັດການ" }, { status: 403 });
+  if (!requireManager(session)) {
+    return jsonError("ສະເພາະຫົວໜ້າ/ຜູ້ຈັດການ", 403);
   }
 
   try {
     const { target_code } = await request.json();
     if (!target_code) {
-      return NextResponse.json({ error: "ກະລຸນາເລືອກຜູ້ຖືກປະເມີນ" }, { status: 400 });
+      return jsonError("ກະລຸນາເລືອກຜູ້ຖືກປະເມີນ", 400);
     }
 
     const year = String(new Date().getFullYear());
 
     try {
-      const created = await prisma.odg_staff_eval_assignment.create({
-        data: { evaluator_code: emp.employeeCode, target_code, year },
-      });
-      return NextResponse.json(created, { status: 201 });
-    } catch (e: unknown) {
-      if (e && typeof e === "object" && "code" in e && e.code === "P2002") {
-        return NextResponse.json({ error: "ມີໃນລາຍການແລ້ວ" }, { status: 409 });
+      const { rows } = await pool.query(
+        `INSERT INTO odg_staff_eval_assignment (evaluator_code, target_code, year)
+         VALUES ($1,$2,$3)
+         RETURNING *`,
+        [session.employee.employeeCode, target_code, year]
+      );
+      return NextResponse.json(rows[0], { status: 201 });
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "code" in err && err.code === "23505") {
+        return jsonError("ມີໃນລາຍການແລ້ວ", 409);
       }
-      throw e;
+      throw err;
     }
   } catch (err) {
     console.error("Failed to add assignment:", err);
-    return NextResponse.json({ error: "ເກີດຂໍ້ຜິດພາດ" }, { status: 500 });
+    return jsonError("ເກີດຂໍ້ຜິດພາດ", 500);
   }
 }
 
-/** DELETE — ລົບ assignment */
 export async function DELETE(request: NextRequest) {
   const session = await getSession();
   if (!session?.employee) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonError("Unauthorized", 401);
   }
-
-  const emp = session.employee;
-  const isManager = ["11", "12"].includes(emp.positionCode);
-  if (!isManager) {
-    return NextResponse.json({ error: "ສະເພາະຫົວໜ້າ/ຜູ້ຈັດການ" }, { status: 403 });
+  if (!requireManager(session)) {
+    return jsonError("ສະເພາະຫົວໜ້າ/ຜູ້ຈັດການ", 403);
   }
 
   try {
     const { id } = await request.json();
     if (!id) {
-      return NextResponse.json({ error: "ບໍ່ພົບ ID" }, { status: 400 });
+      return jsonError("ບໍ່ພົບ ID", 400);
     }
 
-    await prisma.odg_staff_eval_assignment.deleteMany({
-      where: { id: Number(id), evaluator_code: emp.employeeCode },
-    });
+    await pool.query(
+      "DELETE FROM odg_staff_eval_assignment WHERE id = $1 AND evaluator_code = $2",
+      [Number(id), session.employee.employeeCode]
+    );
 
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Failed to delete assignment:", err);
-    return NextResponse.json({ error: "ເກີດຂໍ້ຜິດພາດ" }, { status: 500 });
+    return jsonError("ເກີດຂໍ້ຜິດພາດ", 500);
   }
 }

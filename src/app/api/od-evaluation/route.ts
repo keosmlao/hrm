@@ -1,73 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import prisma from "@/lib/prisma";
-
-interface SessionData {
-  lineUserId: string;
-  lineDisplayName: string;
-  linePictureUrl: string | null;
-  employee: {
-    employeeCode: string;
-    positionCode: string;
-    departmentCode: string;
-  } | null;
-}
-
-async function getSession(): Promise<SessionData | null> {
-  const cookieStore = await cookies();
-  const session = cookieStore.get("session");
-  if (!session) return null;
-  try {
-    return JSON.parse(Buffer.from(session.value, "base64").toString());
-  } catch {
-    return null;
-  }
-}
+import pool from "@/lib/server/db";
+import { getSession } from "@/lib/server/session";
+import { jsonError } from "@/lib/server/http";
 
 export async function GET() {
   const session = await getSession();
-  if (!session?.employee) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const employee = session?.employee;
+  if (!employee) {
+    return jsonError("Unauthorized", 401);
   }
 
   try {
     const canViewSummary =
-      session.employee.positionCode === "11" &&
-      ["701", "801"].includes(session.employee.departmentCode);
-    const [mine, summaryRows] = await Promise.all([
-      prisma.odg_od_evaluation.findUnique({
-        where: { employee_code: session.employee.employeeCode },
-      }),
+      employee.positionCode === "11" && ["701", "801"].includes(employee.departmentCode);
+
+    const [mineRows, summaryRows] = await Promise.all([
+      pool.query("SELECT * FROM odg_od_evaluation WHERE employee_code = $1 LIMIT 1", [
+        employee.employeeCode,
+      ]),
       canViewSummary
-        ? prisma.$queryRaw`SELECT
-               COUNT(*)::int as total,
-               COUNT(*) FILTER (WHERE q1)::int as q1_good,
-               COUNT(*) FILTER (WHERE q2)::int as q2_good,
-               COUNT(*) FILTER (WHERE q3)::int as q3_good,
-               COUNT(*) FILTER (WHERE q4)::int as q4_good,
-               COUNT(*) FILTER (WHERE q5)::int as q5_good,
-               COUNT(*) FILTER (WHERE q6)::int as q6_good
+        ? pool.query(
+            `SELECT COUNT(*)::int as total,
+                    COUNT(*) FILTER (WHERE q1)::int as q1_good,
+                    COUNT(*) FILTER (WHERE q2)::int as q2_good,
+                    COUNT(*) FILTER (WHERE q3)::int as q3_good,
+                    COUNT(*) FILTER (WHERE q4)::int as q4_good,
+                    COUNT(*) FILTER (WHERE q5)::int as q5_good,
+                    COUNT(*) FILTER (WHERE q6)::int as q6_good
              FROM odg_od_evaluation`
+          )
         : Promise.resolve(null),
     ]);
 
     return NextResponse.json({
-      submitted: mine || null,
-      summary: Array.isArray(summaryRows) ? summaryRows[0] : null,
+      submitted: mineRows.rows[0] || null,
+      summary: summaryRows?.rows[0] || null,
     });
   } catch (err) {
     console.error("Failed to fetch OD evaluation:", err);
-    return NextResponse.json(
-      { error: "Failed to fetch evaluation" },
-      { status: 500 }
-    );
+    return jsonError("Failed to fetch evaluation", 500);
   }
 }
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
-  if (!session?.employee) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const employee = session?.employee;
+  if (!employee) {
+    return jsonError("Unauthorized", 401);
   }
 
   try {
@@ -82,42 +61,27 @@ export async function POST(request: NextRequest) {
       typeof q5 !== "boolean" ||
       typeof q6 !== "boolean"
     ) {
-      return NextResponse.json(
-        { error: "ກະລຸນາຕອບທຸກຄຳຖາມ" },
-        { status: 400 }
-      );
+      return jsonError("ກະລຸນາຕອບທຸກຄຳຖາມ", 400);
     }
 
-    const existing = await prisma.odg_od_evaluation.findUnique({
-      where: { employee_code: session.employee.employeeCode },
-      select: { id: true },
-    });
-    if (existing) {
-      return NextResponse.json(
-        { error: "ທ່ານໄດ້ປະເມີນແລ້ວ ບໍ່ສາມາດສົ່ງຊ້ຳໄດ້" },
-        { status: 409 }
-      );
+    const { rows: existingRows } = await pool.query(
+      "SELECT id FROM odg_od_evaluation WHERE employee_code = $1 LIMIT 1",
+      [employee.employeeCode]
+    );
+    if (existingRows.length > 0) {
+      return jsonError("ທ່ານໄດ້ປະເມີນແລ້ວ ບໍ່ສາມາດສົ່ງຊ້ຳໄດ້", 409);
     }
 
-    const result = await prisma.odg_od_evaluation.create({
-      data: {
-        employee_code: session.employee.employeeCode,
-        q1,
-        q2,
-        q3,
-        q4,
-        q5,
-        q6,
-        comment: comment || null,
-      },
-    });
+    const { rows } = await pool.query(
+      `INSERT INTO odg_od_evaluation (employee_code, q1, q2, q3, q4, q5, q6, comment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING *`,
+      [employee.employeeCode, q1, q2, q3, q4, q5, q6, comment || null]
+    );
 
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(rows[0], { status: 201 });
   } catch (err) {
     console.error("Failed to save OD evaluation:", err);
-    return NextResponse.json(
-      { error: "ບໍ່ສາມາດບັນທຶກຂໍ້ມູນໄດ້" },
-      { status: 500 }
-    );
+    return jsonError("ບໍ່ສາມາດບັນທຶກຂໍ້ມູນໄດ້", 500);
   }
 }

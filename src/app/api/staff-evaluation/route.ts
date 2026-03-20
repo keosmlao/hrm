@@ -1,279 +1,259 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import prisma from "@/lib/prisma";
+import pool from "@/lib/server/db";
+import { getSession } from "@/lib/server/session";
+import { jsonError } from "@/lib/server/http";
 
-interface SessionData {
-  lineUserId: string;
-  employee: {
-    employeeCode: string;
-    positionCode: string;
-    departmentCode: string;
-    unitCode: string;
-  } | null;
-}
-
-async function getSession(): Promise<SessionData | null> {
-  const cookieStore = await cookies();
-  const session = cookieStore.get("session");
-  if (!session) return null;
-  try {
-    return JSON.parse(Buffer.from(session.value, "base64").toString());
-  } catch {
-    return null;
-  }
-}
-
-/** ຄຳນວນເດືອນກ່ອນໜ້າ (ເດືອນທີ່ຕ້ອງປະເມີນ) */
-function getPreviousMonth(): { year: string; month: number } {
+function getPreviousMonth() {
   const now = new Date();
-  let m = now.getMonth(); // 0-indexed: Jan=0
-  let y = now.getFullYear();
-  if (m === 0) {
-    // ມັງກອນ → ປະເມີນເດືອນ 12 ຂອງປີກ່ອນ
-    return { year: String(y - 1), month: 12 };
-  }
-  return { year: String(y), month: m }; // m is already prev month (0-indexed)
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  if (month === 0) return { year: String(year - 1), month: 12 };
+  return { year: String(year), month };
 }
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
-  if (!session?.employee) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const employee = session?.employee;
+  if (!employee) {
+    return NextResponse.json({
+      employeeCode: "",
+      employeeName: "",
+      selfEval: null,
+      myEvals: [],
+      targets: [],
+      isManager: false,
+      currentMonth: getPreviousMonth().month,
+      currentYear: getPreviousMonth().year,
+      availableMonths: [],
+      completedSelfMonths: [],
+    });
   }
 
-  const empCode = session.employee.employeeCode;
-  const prev = getPreviousMonth();
-  const year = request.nextUrl.searchParams.get("year") || prev.year;
-  const month = Number(request.nextUrl.searchParams.get("month")) || prev.month;
+  const previousMonth = getPreviousMonth();
+  const year = request.nextUrl.searchParams.get("year") || previousMonth.year;
+  const month = Number(request.nextUrl.searchParams.get("month")) || previousMonth.month;
 
   try {
-    const criteriaPromise = prisma.odg_staff_eval_criteria.findMany({
-      orderBy: [{ question_order: 'asc' }, { option_id: 'asc' }],
-    });
-    const selfEvalPromise = prisma.odg_staff_evaluation.findFirst({
-      where: { evaluator_code: empCode, target_code: empCode, year, month },
-    });
-    const evalsPromise = prisma.odg_staff_evaluation.findMany({
-      where: { evaluator_code: empCode, target_code: { not: empCode }, year, month },
-      orderBy: { created_at: 'desc' },
-    });
+    const [criteriaRes, selfEvalRes, evalsRes, completedSelfMonthsRes] = await Promise.all([
+      pool.query(
+        "SELECT * FROM odg_staff_eval_criteria ORDER BY question_order ASC, option_id ASC"
+      ),
+      pool.query(
+        `SELECT * FROM odg_staff_evaluation
+         WHERE evaluator_code = $1 AND target_code = $1 AND year = $2 AND month = $3
+         LIMIT 1`,
+        [employee.employeeCode, year, month]
+      ),
+      pool.query(
+        `SELECT * FROM odg_staff_evaluation
+         WHERE evaluator_code = $1 AND target_code != $1 AND year = $2 AND month = $3
+         ORDER BY created_at DESC`,
+        [employee.employeeCode, year, month]
+      ),
+      pool.query(
+        `SELECT year, month
+         FROM odg_staff_evaluation
+         WHERE evaluator_code = $1 AND target_code = $1`,
+        [employee.employeeCode]
+      ),
+    ]);
 
-    const [criteria, selfEval, evals] = await Promise.all([
-      criteriaPromise, selfEvalPromise, evalsPromise,
-    ] as const);
+    const evals = evalsRes.rows;
+    const targetCodes = [...new Set(evals.map((row: Record<string, unknown>) => row.target_code as string))];
+    let targetEmployees: { employee_code: string; fullname_lo: string }[] = [];
+    if (targetCodes.length > 0) {
+      const { rows } = await pool.query(
+        "SELECT employee_code, fullname_lo FROM odg_employee WHERE employee_code = ANY($1)",
+        [targetCodes]
+      );
+      targetEmployees = rows;
+    }
 
-    // Build manager evals with target names
-    const targetCodes = [...new Set(evals.map((e) => e.target_code))];
-    const targetEmps = targetCodes.length > 0
-      ? await prisma.odg_employee.findMany({
-          where: { employee_code: { in: targetCodes } },
-          select: { employee_code: true, fullname_lo: true },
-        })
-      : [];
     const nameMap = new Map(
-      targetEmps.map((e: { employee_code: string; fullname_lo: string | null }) => [e.employee_code, e.fullname_lo])
+      targetEmployees.map((targetEmployee) => [targetEmployee.employee_code, targetEmployee.fullname_lo])
     );
-    const evalsWithNames = evals.map((e) => ({ ...e, target_name: nameMap.get(e.target_code) ?? null }));
+    const evalsWithNames = evals.map((evaluation: Record<string, unknown>) => ({
+      ...evaluation,
+      target_name: nameMap.get(evaluation.target_code as string) ?? null,
+    }));
 
-    // Check if manager/head
-    const isManager = ["11", "12"].includes(session.employee.positionCode);
-
+    const isManager = ["11", "12"].includes(employee.positionCode);
     let targets: { employee_code: string; fullname_lo: string; source: string }[] = [];
 
     if (isManager) {
-      // ລູກທີມ = ຄົນໃນພະແນກ/ໜ່ວຍງານ ທີ່ຕຳແໜ່ງຕ່ຳກ່ວາ
-      // position_code 11=ຜູ້ຈັດການ, 12=ຫົວໜ້າ, ອື່ນໆ=ພະນັກງານ
-      const posCode = session.employee.positionCode;
-      const departmentCode = session.employee.departmentCode;
-      const unitCode = session.employee.unitCode;
-      const posNotIn = posCode === '11' ? ['11'] : ['11', '12'];
-
-      const [team, assignedRows] = await Promise.all([
-        prisma.odg_employee.findMany({
-          where: {
-            department_code: departmentCode,
-            employee_code: { not: empCode },
-            employment_status: 'ACTIVE',
-            position_code: { notIn: posNotIn },
-          },
-          select: { employee_code: true, fullname_lo: true },
-          orderBy: { fullname_lo: 'asc' },
-        }),
-        prisma.odg_staff_eval_assignment.findMany({
-          where: { evaluator_code: empCode, year },
-        }),
+      const posNotIn = employee.positionCode === "11" ? ["11"] : ["11", "12"];
+      const [teamRes, assignedRes] = await Promise.all([
+        pool.query(
+          `SELECT employee_code, fullname_lo
+           FROM odg_employee
+           WHERE department_code = $1
+             AND employee_code != $2
+             AND employment_status = 'ACTIVE'
+             AND NOT (position_code = ANY($3))
+           ORDER BY fullname_lo ASC`,
+          [employee.departmentCode, employee.employeeCode, posNotIn]
+        ),
+        pool.query(
+          "SELECT * FROM odg_staff_eval_assignment WHERE evaluator_code = $1 AND year = $2",
+          [employee.employeeCode, year]
+        ),
       ]);
 
-      const assignedCodes = assignedRows.map(a => a.target_code);
-      const assignedEmps = assignedCodes.length > 0
-        ? await prisma.odg_employee.findMany({
-            where: { employee_code: { in: assignedCodes } },
-            select: { employee_code: true, fullname_lo: true },
-            orderBy: { fullname_lo: 'asc' },
-          })
-        : [];
+      const assignedCodes = assignedRes.rows.map(
+        (assignment: Record<string, unknown>) => assignment.target_code as string
+      );
+      let assignedEmployees: { employee_code: string; fullname_lo: string }[] = [];
+      if (assignedCodes.length > 0) {
+        const { rows } = await pool.query(
+          `SELECT employee_code, fullname_lo
+           FROM odg_employee
+           WHERE employee_code = ANY($1)
+           ORDER BY fullname_lo ASC`,
+          [assignedCodes]
+        );
+        assignedEmployees = rows;
+      }
 
-      targets = team.map((r) => ({
-        ...r,
-        source: "team",
-      }));
       targets = [
-        ...targets,
-        ...assignedEmps.map((r) => ({
-          ...r,
-          source: "assigned",
+        ...teamRes.rows.map((row: Record<string, unknown>) => ({
+          employee_code: row.employee_code as string,
+          fullname_lo: row.fullname_lo as string,
+          source: "team",
         })),
+        ...assignedEmployees.map((row) => ({ ...row, source: "assigned" })),
       ];
     }
 
-    // ເດືອນທີ່ປະເມີນໄດ້ (ເດືອນກ່ອນໜ້າ ພາຍໃນປີ)
     const currentYear = new Date().getFullYear();
-    const currentMonth = new Date().getMonth(); // 0-indexed
+    const currentMonth = new Date().getMonth();
     const availableMonths: { year: string; month: number }[] = [];
-    for (let m = 1; m <= currentMonth; m++) {
-      availableMonths.push({ year: String(currentYear), month: m });
+    for (let current = 1; current <= currentMonth; current += 1) {
+      availableMonths.push({ year: String(currentYear), month: current });
     }
-    // ຖ້າເດືອນ ມ.ກ. → ເພີ່ມເດືອນ 12 ປີກ່ອນ
     if (currentMonth === 0) {
       availableMonths.push({ year: String(currentYear - 1), month: 12 });
     }
 
     return NextResponse.json({
-      criteria,
-      selfEval: selfEval || null,
+      employeeCode: employee.employeeCode,
+      employeeName: `${employee.titleLo ? `${employee.titleLo} ` : ""}${employee.fullnameLo}`.trim(),
+      criteria: criteriaRes.rows,
+      selfEval: selfEvalRes.rows[0] || null,
       myEvals: evalsWithNames,
       targets,
       isManager,
       currentMonth: month,
       currentYear: year,
       availableMonths,
+      completedSelfMonths: completedSelfMonthsRes.rows,
     });
   } catch (err) {
     console.error("Failed to fetch staff evaluation:", err);
-    return NextResponse.json(
-      { error: "Failed to fetch data" },
-      { status: 500 }
-    );
+    return jsonError("Failed to fetch data", 500);
   }
 }
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
-  if (!session?.employee) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const employee = session?.employee;
+  if (!employee) {
+    return jsonError("Unauthorized", 401);
   }
 
   try {
     const body = await request.json();
     const { target_code, scores, comment } = body;
-    const empCode = session.employee.employeeCode;
+    const previousMonth = getPreviousMonth();
+    const year = body.year || previousMonth.year;
+    const month = body.month || previousMonth.month;
 
-    // ໃຊ້ເດືອນຈາກ client (ສຳລັບປະເມີນເດືອນຄ້າງ) ຫຼື ເດືອນກ່ອນໜ້າ
-    const prev = getPreviousMonth();
-    const year = body.year || prev.year;
-    const month = body.month || prev.month;
-
-    // ກວດວ່າເດືອນທີ່ສົ່ງມາຢູ່ໃນຊ່ວງປະເມີນໄດ້
     const now = new Date();
-    const curYear = now.getFullYear();
-    const curMonth0 = now.getMonth(); // 0-indexed
+    const currentYear = now.getFullYear();
+    const currentMonthZeroIndexed = now.getMonth();
     const requestedYear = Number(year);
     const requestedMonth = Number(month);
     let isValidMonth = false;
-    if (requestedYear === curYear && requestedMonth >= 1 && requestedMonth <= curMonth0) {
+
+    if (
+      requestedYear === currentYear &&
+      requestedMonth >= 1 &&
+      requestedMonth <= currentMonthZeroIndexed
+    ) {
       isValidMonth = true;
-    } else if (curMonth0 === 0 && requestedYear === curYear - 1 && requestedMonth === 12) {
+    } else if (
+      currentMonthZeroIndexed === 0 &&
+      requestedYear === currentYear - 1 &&
+      requestedMonth === 12
+    ) {
       isValidMonth = true;
     }
+
     if (!isValidMonth) {
-      return NextResponse.json(
-        { error: "ບໍ່ສາມາດປະເມີນເດືອນນີ້ໄດ້" },
-        { status: 400 }
-      );
+      return jsonError("ບໍ່ສາມາດປະເມີນເດືອນນີ້ໄດ້", 400);
     }
 
     if (!target_code || !scores || typeof scores !== "object") {
-      return NextResponse.json(
-        { error: "ກະລຸນາປ້ອນຂໍ້ມູນໃຫ້ຄົບ" },
-        { status: 400 }
-      );
+      return jsonError("ກະລຸນາປ້ອນຂໍ້ມູນໃຫ້ຄົບ", 400);
     }
 
-    // Determine eval type
     let evalType = "self";
-    const targetCode = target_code;
-    const departmentCode = session.employee.departmentCode;
-    const unitCode = session.employee.unitCode;
-
-    if (targetCode !== empCode) {
-      const posCode = session.employee.positionCode;
-      const isManager = ["11", "12"].includes(posCode);
+    if (target_code !== employee.employeeCode) {
+      const isManager = ["11", "12"].includes(employee.positionCode);
       if (!isManager) {
-        return NextResponse.json(
-          { error: "ທ່ານບໍ່ມີສິດປະເມີນຜູ້ອື່ນ" },
-          { status: 403 }
-        );
+        return jsonError("ທ່ານບໍ່ມີສິດປະເມີນຜູ້ອື່ນ", 403);
       }
 
-      // ກວດວ່າ target ແມ່ນລູກທີມ (ພະແນກ/ໜ່ວຍງານດຽວກັນ, ຕຳແໜ່ງຕ່ຳກ່ວາ, ACTIVE)
-      const posNotIn = posCode === "11" ? ["11"] : ["11", "12"];
-      const teamCheck = await prisma.odg_employee.findFirst({
-        where: {
-          employee_code: targetCode,
-          department_code: departmentCode,
-          employment_status: "ACTIVE",
-          position_code: { notIn: posNotIn },
-        },
-        select: { employee_code: true },
-      });
+      const posNotIn = employee.positionCode === "11" ? ["11"] : ["11", "12"];
+      const { rows: teamCheck } = await pool.query(
+        `SELECT employee_code
+         FROM odg_employee
+         WHERE employee_code = $1
+           AND department_code = $2
+           AND employment_status = 'ACTIVE'
+           AND NOT (position_code = ANY($3))
+         LIMIT 1`,
+        [target_code, employee.departmentCode, posNotIn]
+      );
 
-      if (teamCheck) {
+      if (teamCheck.length > 0) {
         evalType = "manager";
       } else {
-        // ກວດວ່າ target ຖືກ assign ມາ
-        const assignCheck = await prisma.odg_staff_eval_assignment.findFirst({
-          where: { evaluator_code: empCode, target_code: targetCode, year },
-        });
-        if (assignCheck) {
+        const { rows: assignCheck } = await pool.query(
+          `SELECT id
+           FROM odg_staff_eval_assignment
+           WHERE evaluator_code = $1 AND target_code = $2 AND year = $3
+           LIMIT 1`,
+          [employee.employeeCode, target_code, year]
+        );
+        if (assignCheck.length > 0) {
           evalType = "cross";
         } else {
-          return NextResponse.json(
-            { error: "ທ່ານບໍ່ໄດ້ຮັບ assign ໃຫ້ປະເມີນຄົນນີ້" },
-            { status: 403 }
-          );
+          return jsonError("ທ່ານບໍ່ໄດ້ຮັບ assign ໃຫ້ປະເມີນຄົນນີ້", 403);
         }
       }
     }
 
-    // Check duplicate for this month
-    const existing = await prisma.odg_staff_evaluation.findFirst({
-      where: { evaluator_code: empCode, target_code: targetCode, year, month },
-    });
-    if (existing) {
-      return NextResponse.json(
-        { error: "ທ່ານໄດ້ປະເມີນຄົນນີ້ເດືອນນີ້ແລ້ວ ບໍ່ສາມາດສົ່ງຊ້ຳໄດ້" },
-        { status: 409 }
-      );
+    const { rows: existingRows } = await pool.query(
+      `SELECT id
+       FROM odg_staff_evaluation
+       WHERE evaluator_code = $1 AND target_code = $2 AND year = $3 AND month = $4
+       LIMIT 1`,
+      [employee.employeeCode, target_code, year, month]
+    );
+    if (existingRows.length > 0) {
+      return jsonError("ທ່ານໄດ້ປະເມີນຄົນນີ້ເດືອນນີ້ແລ້ວ", 409);
     }
 
-    const result = await prisma.odg_staff_evaluation.create({
-      data: {
-        evaluator_code: empCode,
-        target_code: targetCode,
-        eval_type: evalType,
-        year,
-        month,
-        scores,
-        comment: comment || null,
-      },
-    });
+    const { rows } = await pool.query(
+      `INSERT INTO odg_staff_evaluation (evaluator_code, target_code, eval_type, year, month, scores, comment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING *`,
+      [employee.employeeCode, target_code, evalType, year, month, JSON.stringify(scores), comment || null]
+    );
 
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(rows[0], { status: 201 });
   } catch (err) {
     console.error("Failed to save staff evaluation:", err);
-    return NextResponse.json(
-      { error: "ບໍ່ສາມາດບັນທຶກຂໍ້ມູນໄດ້" },
-      { status: 500 }
-    );
+    return jsonError("ບໍ່ສາມາດບັນທຶກຂໍ້ມູນໄດ້", 500);
   }
 }

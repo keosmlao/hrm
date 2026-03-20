@@ -1,18 +1,21 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import pool from "@/lib/server/db";
+import { getSession } from "@/lib/server/session";
+import { jsonError } from "@/lib/server/http";
 
 export async function GET() {
+  const session = await getSession();
+  if (!session) {
+    return jsonError("Unauthorized", 401);
+  }
+
   try {
-    const employees = await prisma.odg_employee.findMany({
-      take: 100,
-      orderBy: { employee_id: 'asc' },
-    });
-    return NextResponse.json(employees);
+    const { rows } = await pool.query(
+      "SELECT * FROM odg_employee ORDER BY employee_id ASC LIMIT 100"
+    );
+    return NextResponse.json(rows);
   } catch (err) {
     console.error("Database query error:", err);
-    return NextResponse.json(
-      { error: "Failed to fetch employees" },
-      { status: 500 }
-    );
+    return jsonError("Failed to fetch employees", 500);
   }
 }

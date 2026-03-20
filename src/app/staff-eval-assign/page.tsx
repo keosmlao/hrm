@@ -1,164 +1,78 @@
+"use client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import prisma from "@/lib/prisma";
-import AppLogo from "@/components/app-logo";
-import AssignForm from "./assign-form";
+import { useRouter } from "next/navigation";
+import { ApiError, apiFetch } from "@/lib/api";
+import AssignForm from "@/components/assign-form";
+import { AppShell, EmptyStatePanel, HeaderIconTile, PageHero, PageLoading, PageMetric } from "@/components/app-shell";
 
-interface SessionData {
-  lineUserId: string;
-  employee: {
-    employeeCode: string;
-    positionCode: string;
-    departmentCode: string;
-    unitCode: string;
-  } | null;
-}
+export default function StaffEvalAssignPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
 
-async function getSession(): Promise<SessionData | null> {
-  const cookieStore = await cookies();
-  const session = cookieStore.get("session");
-  if (!session) return null;
-  try {
-    return JSON.parse(Buffer.from(session.value, "base64").toString());
-  } catch {
-    return null;
-  }
-}
-
-export default async function StaffEvalAssignPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-
-  const emp =
-    session.employee
-      ? {
-          employee_code: session.employee.employeeCode,
-          position_code: session.employee.positionCode,
-          department_code: session.employee.departmentCode,
-          unit_code: session.employee.unitCode,
+  useEffect(() => {
+    apiFetch<Record<string, unknown>>("/staff-eval-assign")
+      .then(setData)
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 403) {
+          setAccessDenied(true);
+          return;
         }
-      : await prisma.odg_employee.findFirst({
-          where: { line_id: session.lineUserId },
-          select: {
-            employee_code: true,
-            position_code: true,
-            department_code: true,
-            unit_code: true,
-          },
-        });
+        router.replace("/login");
+      })
+      .finally(() => setLoading(false));
+  }, [router]);
 
-  if (!emp) {
-    return (
-      <div className="min-h-screen bg-[linear-gradient(180deg,var(--brand-50)_0%,#ffffff_100%)]">
-        <Nav />
-        <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-          <div className="rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-brand-100">
-            <p className="text-brand-500">ບໍ່ພົບຂໍ້ມູນພະນັກງານ</p>
-          </div>
-        </main>
-      </div>
-    );
-  }
+  if (loading) return <PageLoading />;
 
-  const isManager = ["11", "12"].includes(emp.position_code ?? "");
-
-  if (!isManager) {
-    return (
-      <div className="min-h-screen bg-[linear-gradient(180deg,var(--brand-50)_0%,#ffffff_100%)]">
-        <Nav />
-        <main className="mx-auto max-w-3xl px-6 py-8">
-          <div className="rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-brand-100">
-            <p className="text-brand-500">ສະເພາະຫົວໜ້າ ແລະ ຜູ້ຈັດການ ເທົ່ານັ້ນ</p>
-            <Link href="/home" className="mt-4 inline-block text-sm text-brand-700 underline">
-              ກັບໜ້າຫຼັກ
-            </Link>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  const year = String(new Date().getFullYear());
-
-  // ລາຍຊື່ທີ່ assign ແລ້ວ
-  const posCode = emp.position_code;
-
-  const assignmentRows = await prisma.odg_staff_eval_assignment.findMany({
-    where: { evaluator_code: emp.employee_code, year },
-    orderBy: { id: 'asc' },
-  });
-  const assignedCodes = assignmentRows.map(a => a.target_code);
-  const posNotIn = posCode === '11' ? ['11'] : ['11', '12'];
-  const [assignedEmps, candidateRows] = await Promise.all([
-    assignedCodes.length > 0
-      ? prisma.odg_employee.findMany({
-          where: { employee_code: { in: assignedCodes } },
-          include: { odg_position_rel: true, odg_department_rel: true },
-        })
-      : Promise.resolve([]),
-    prisma.odg_employee.findMany({
-      where: {
-        employee_code: { not: emp.employee_code, notIn: assignedCodes },
-        employment_status: 'ACTIVE',
-        position_code: { notIn: posNotIn },
-      },
-      include: { odg_position_rel: true, odg_department_rel: true },
-      orderBy: [{ position_code: 'asc' }, { fullname_lo: 'asc' }],
-    }),
-  ]);
-  const empMap = new Map(assignedEmps.map(e => [e.employee_code, e]));
-  const assigned = assignmentRows.map(a => {
-    const e = empMap.get(a.target_code);
-    return {
-      id: a.id,
-      target_code: a.target_code,
-      fullname_lo: e?.fullname_lo ?? null,
-      position_code: e?.position_code ?? null,
-      position_name_lo: e?.odg_position_rel?.position_name_lo ?? null,
-      department_code: e?.department_code ?? null,
-      department_name_lo: e?.odg_department_rel?.department_name_lo ?? null,
-    };
-  });
-  const candidates = candidateRows.map(e => ({
-    employee_code: e.employee_code,
-    fullname_lo: e.fullname_lo,
-    position_code: e.position_code,
-    position_name_lo: e.odg_position_rel?.position_name_lo ?? null,
-    department_code: e.department_code,
-    department_name_lo: e.odg_department_rel?.department_name_lo ?? null,
-  }));
+  const assigned = Array.isArray(data?.assigned) ? (data?.assigned as never[]) : [];
+  const candidates = Array.isArray(data?.candidates) ? (data?.candidates as never[]) : [];
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,var(--brand-50)_0%,#ffffff_100%)]">
-      <Nav />
-      <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-        <AssignForm
-          assigned={assigned}
-          candidates={candidates}
-        />
-      </main>
-    </div>
+    <AppShell
+      title="ຕັ້ງຄ່າຜູ້ຖືກປະເມີນ"
+      description="ເພີ່ມ ຫຼື ຖອນລາຍຊື່ຄົນທີ່ຕ້ອງປະເມີນເພີ່ມເຕີມ"
+      icon={<HeaderIconTile accent="rose"><UserPlusIcon className="h-5 w-5" /></HeaderIconTile>}
+      containerClassName="max-w-4xl"
+    >
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Assignment Setup"
+          title="ຈັດການລາຍຊື່ຜູ້ຖືກປະເມີນແບບຍືດຫຍຸ່ນ"
+          description="ໜ້ານີ້ຊ່ວຍໃຫ້ຫົວໜ້າ ແລະ ຜູ້ຈັດການກຳນົດລາຍຊື່ຄົນທີ່ຈະຖືກປະເມີນເພີ່ມນອກເຫນືອຈາກລູກທີມຫຼັກ."
+          badge={accessDenied ? "Restricted" : "Manager Tools"}
+          accent="rose"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <PageMetric label="Assigned" value={assigned.length} tone="rose" />
+            <PageMetric label="Available" value={candidates.length} tone="teal" />
+          </div>
+        </PageHero>
+
+        {accessDenied ? (
+          <EmptyStatePanel
+            title="ສະເພາະຫົວໜ້າ ແລະ ຜູ້ຈັດການ"
+            description="ບັນຊີນີ້ບໍ່ມີສິດເຂົ້າໃຊ້ໜ້າຈັດການການ assign."
+            action={<Link href="/home" className="inline-flex rounded-xl border border-slate-200/70 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition-all hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700">ກັບໜ້າຫຼັກ</Link>}
+          />
+        ) : data ? (
+          <AssignForm assigned={assigned} candidates={candidates} />
+        ) : (
+          <EmptyStatePanel title="ບໍ່ພົບຂໍ້ມູນ" description="ລະບົບບໍ່ສາມາດໂຫຼດລາຍການ assign ແລະ candidate ໄດ້." />
+        )}
+      </div>
+    </AppShell>
   );
 }
 
-function Nav() {
+function UserPlusIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
-    <nav className="bg-brand-700 text-white shadow-sm">
-      <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <AppLogo className="shrink-0" />
-          <h1 className="text-lg font-bold leading-tight text-white sm:text-xl">
-            ຕັ້ງຄ່າຜູ້ຖືກປະເມີນເພີ່ມເຕີມ
-          </h1>
-        </div>
-        <Link
-          href="/home"
-          className="self-stretch rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-white/20 sm:self-auto"
-        >
-          ກັບໜ້າຫຼັກ
-        </Link>
-      </div>
-    </nav>
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <circle cx="8" cy="6" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M2.5 17c0-3.04 2.46-5.5 5.5-5.5s5.5 2.46 5.5 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M16 8v4m-2-2h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
   );
 }

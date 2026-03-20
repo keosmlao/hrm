@@ -1,25 +1,19 @@
+@config "../../tailwind.config.ts";
 @import "tailwindcss";
 
 :root {
-  --background: #f5f8fc;
-  --foreground: #18253c;
-  --brand-50: #eef4fb;
-  --brand-100: #dbe7f6;
-  --brand-200: #bfd3eb;
-  --brand-300: #95b7dd;
-  --brand-400: #6f96cb;
-  --brand-500: #2f65ab;
-  --brand-600: #285794;
-  --brand-700: #21487a;
-  --brand-800: #1a395f;
-  --brand-900: #152d4a;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-brand-50: var(--brand-50);
-  --color-brand-100: var(--brand-100);
+  --background: #edf0f7;
+  --foreground: #152236;
+  --brand-50: #edf2fb;
+  --brand-100: #d4e1f5;
+  --brand-200: #a9c4eb;
+  --brand-300: #7da6e0;
+  --brand-400: #5288d4;
+  --brand-500: #2F65AB;
+  --brand-600: #265189;
+  --brand-700: #1d3e68;
+  --brand-800: #142c4a;
+  --brand-900: #0c1a2d;
   --color-brand-200: var(--brand-200);
   --color-brand-300: var(--brand-300);
   --color-brand-400: var(--brand-400);
@@ -28,20 +22,18 @@
   --color-brand-700: var(--brand-700);
   --color-brand-800: var(--brand-800);
   --color-brand-900: var(--brand-900);
-  --font-sans: var(--font-app-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-app-sans), sans-serif;
+  font-family: "Noto Sans Lao", sans-serif;
   touch-action: manipulation;
 }
 
 ::selection {
   background: var(--brand-200);
-  color: var(--brand-900);
+  color: #0c1a2d;
 }
 
 input,

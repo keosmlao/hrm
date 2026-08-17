@@ -1,0 +1,1280 @@
+// ═══════════════════════════════════════════════════════════
+// ODIEN HRM — ຕໍ່ກັບ DB ຈິງ "odg"
+//
+// ຕາຕະລາງເກົ່າ (odg_*) = ຂໍ້ມູນຈິງທີ່ລະບົບອື່ນ (WMS/TMS/ລົດ) ໃຊ້ຢູ່
+//   → map ຕາມໂຄງສ້າງເດີມແທ້ໆ ຫ້າມແກ້ໄຂ
+// ຕາຕະລາງໃໝ່ (hrm_*) = ສ່ວນທີ່ HRM ເພີ່ມເຂົ້າມາ (ສັນຍາ, ເງິນເດືອນ, ລາ, OT, ລົງເວລາ ...)
+// ═══════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// ຕາຕະລາງເດີມ — ໂຄງສ້າງອົງກອນ (ຫ້າມແກ້)
+// ─────────────────────────────────────────────
+
+model Division {
+  code      String    @id @map("division_code") @db.VarChar(20)
+  nameLo    String    @map("division_name_lo") @db.VarChar(200)
+  nameEn    String?   @map("division_name_en") @db.VarChar(200)
+  isActive  Boolean?  @default(true) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  departments Department[]
+
+  @@map("odg_division")
+}
+
+model Department {
+  code         String    @id @map("department_code") @db.VarChar(20)
+  nameLo       String    @map("department_name_lo") @db.VarChar(200)
+  nameEn       String?   @map("department_name_en") @db.VarChar(200)
+  divisionCode String    @map("division_code") @db.VarChar(20)
+  isActive     Boolean?  @default(true) @map("is_active")
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  division Division @relation(fields: [divisionCode], references: [code], map: "fk_department_division")
+  units    Unit[]
+
+  @@map("odg_department")
+}
+
+model Unit {
+  code           String    @id @map("unit_code") @db.VarChar(20)
+  nameLo         String    @map("unit_name_lo") @db.VarChar(200)
+  nameEn         String?   @map("unit_name_en") @db.VarChar(200)
+  departmentCode String    @map("department_code") @db.VarChar(20)
+  isActive       Boolean?  @default(true) @map("is_active")
+  createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  department Department @relation(fields: [departmentCode], references: [code], map: "fk_unit_department")
+
+  @@map("odg_unit")
+}
+
+model Position {
+  code      String    @id @map("position_code") @db.VarChar(20)
+  nameLo    String    @map("position_name_lo") @db.VarChar(200)
+  nameEn    String?   @map("position_name_en") @db.VarChar(200)
+  isManager Boolean?  @default(false) @map("is_manager")
+  isActive  Boolean?  @default(true) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("odg_position")
+}
+
+/// ພະນັກງານຈິງ — ອ້າງອີງໂດຍ WMS, TMS, ລົດ, ເຂົ້າວຽກ ...
+/// ບໍ່ມີ relation ໄປຫາ odg_department/odg_position ໃນ Prisma ໂດຍເຈດຕະນາ
+/// (ຖ້າປະກາດ Prisma ຈະຢາກເພີ່ມ FK ໃສ່ຕາຕະລາງເກົ່າ — ເຮົາຫ້າມແຕະ)
+model Employee {
+  id               Int       @id @default(autoincrement()) @map("employee_id")
+  code             String    @unique @map("employee_code") @db.VarChar(20)
+  titleLo          String?   @map("title_lo") @db.VarChar(50)
+  fullnameLo       String    @map("fullname_lo") @db.VarChar(200)
+  nickname         String?   @db.VarChar(50)
+  titleEn          String?   @map("title_en") @db.VarChar(20)
+  fullnameEn       String?   @map("fullname_en") @db.VarChar(200)
+  positionCode     String?   @map("position_code") @db.VarChar(20)
+  divisionCode     String?   @map("division_code") @db.VarChar(20)
+  departmentCode   String?   @map("department_code") @db.VarChar(20)
+  unitCode         String?   @map("unit_code") @db.VarChar(20)
+  hireDate         DateTime? @map("hire_date") @db.Date
+  employmentStatus String?   @default("ACTIVE") @map("employment_status") @db.VarChar(20)
+  createdAt        DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  lineId           String?   @unique @map("line_id")
+  password         String?
+  appRole          String?   @map("app_role") @db.VarChar(20)
+  posPinHash       String?   @map("pos_pin_hash") @db.VarChar(200)
+  mobile           String?
+
+  // ─ ສ່ວນທີ່ HRM ເພີ່ມ (ຢູ່ຕາຕະລາງ hrm_*) ─
+  profile               EmployeeProfile?
+  user                  User?
+  contracts             Contract[]
+  documents             EmployeeDocument[]
+  leaveRequests         LeaveRequest[]                @relation("LeaveRequester")
+  leaveBalances         LeaveBalance[]
+  otRequests            OvertimeRequest[]             @relation("OtRequester")
+  payslips              Payslip[]
+  movements             EmployeeMovement[]
+  assetAssignments      AssetAssignment[]
+  subordinatesLink      EmployeeProfile[]             @relation("ManagerLink")
+  attendances           Attendance[]                  @relation("AttendanceEmployee")
+  attendanceCorrections AttendanceCorrectionRequest[]
+  orgHeadOf             OrgHead[]                     @relation("OrgHead")
+  tripApprovalSteps     TripApprovalStep[]            @relation("TripApprovalStepApprover")
+  appraisals            Appraisal[]                   @relation("AppraisalEmployee")
+  appraisalsToDo        Appraisal[]                   @relation("AppraisalEvaluator")
+  shiftAssignments      EmployeeShiftAssignment[]
+  scheduledDaysOff      EmployeeDayOff[]
+  tripsDriving          VehicleTrip[]                 @relation("TripDriver")
+  tripsRequested        VehicleTrip[]                 @relation("TripRequester")
+  tripMemberships       TripMember[]
+  vehicleApprover       VehicleApprover?
+
+  @@map("odg_employee")
+}
+
+// ─────────────────────────────────────────────
+// ຂໍ້ມູນເສີມພະນັກງານ (HRM) — ບໍ່ແຕະ odg_employee
+// ─────────────────────────────────────────────
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+enum HrStatus {
+  PROBATION // ທົດລອງງານ
+  ACTIVE // ປະຈຳການ
+  ON_LEAVE // ພັກຊົ່ວຄາວ
+  SUSPENDED // ພັກງານ (ວິໄນ)
+  RESIGNED // ລາອອກ
+  TERMINATED // ຖືກໃຫ້ອອກ
+}
+
+model EmployeeProfile {
+  employeeCode String @id @map("employee_code") @db.VarChar(20)
+
+  gender           Gender?
+  dob              DateTime?      @db.Date
+  nationalId       String?        @map("national_id")
+  maritalStatus    MaritalStatus? @map("marital_status")
+  email            String?
+  address          String?
+  photoUrl         String?        @map("photo_url")
+  probationEndDate DateTime?      @map("probation_end_date") @db.Date
+  resignDate       DateTime?      @map("resign_date") @db.Date
+  hrStatus         HrStatus       @default(ACTIVE) @map("hr_status")
+
+  baseSalary        Decimal @default(0) @map("base_salary") @db.Decimal(14, 2)
+  positionAllowance Decimal @default(0) @map("position_allowance") @db.Decimal(14, 2)
+  bankName          String? @map("bank_name")
+  bankAccountNo     String? @map("bank_account_no")
+  socialSecurityNo  String? @map("social_security_no")
+  taxId             String? @map("tax_id")
+
+  managerCode String? @map("manager_code") @db.VarChar(20)
+
+  employee Employee  @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+  manager  Employee? @relation("ManagerLink", fields: [managerCode], references: [code])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([managerCode])
+  @@map("hrm_employee_profile")
+}
+
+// ─────────────────────────────────────────────
+// ຜູ້ໃຊ້ ແລະ ສິດທິ (HRM)
+// ─────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  HR
+  MANAGER
+  EMPLOYEE
+  EXECUTIVE
+}
+
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  email        String?   @unique
+  passwordHash String    @map("password_hash")
+  role         Role      @default(EMPLOYEE)
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+
+  employeeCode  String?              @unique @map("employee_code") @db.VarChar(20)
+  employee      Employee?            @relation(fields: [employeeCode], references: [code])
+  menuOverrides UserMenuPermission[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("hrm_user")
+}
+
+// ─────────────────────────────────────────────
+// ສັນຍາ ແລະ ເອກະສານ
+// ─────────────────────────────────────────────
+
+enum ContractType {
+  PROBATION
+  FIXED_TERM
+  PERMANENT
+  PART_TIME
+  INTERNSHIP
+}
+
+model Contract {
+  id         String       @id @default(cuid())
+  contractNo String       @unique @map("contract_no")
+  type       ContractType
+  startDate  DateTime     @map("start_date") @db.Date
+  endDate    DateTime?    @map("end_date") @db.Date
+  salary     Decimal      @db.Decimal(14, 2)
+  fileUrl    String?      @map("file_url")
+  note       String?
+  isActive   Boolean      @default(true) @map("is_active")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeCode])
+  @@index([endDate])
+  @@map("hrm_contract")
+}
+
+model EmployeeDocument {
+  id         String    @id @default(cuid())
+  name       String
+  type       String?
+  fileUrl    String    @map("file_url")
+  expiryDate DateTime? @map("expiry_date") @db.Date
+  uploadedAt DateTime  @default(now()) @map("uploaded_at")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  @@index([employeeCode])
+  @@map("hrm_employee_document")
+}
+
+// ─────────────────────────────────────────────
+// Workflow ອະນຸມັດ (ໃຊ້ຮ່ວມ)
+// ─────────────────────────────────────────────
+
+enum RequestStatus {
+  DRAFT
+  PENDING_MANAGER
+  PENDING_HR
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ApprovalAction {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+  RETURNED
+}
+
+model ApprovalLog {
+  id          String         @id @default(cuid())
+  entityType  String         @map("entity_type")
+  entityId    String         @map("entity_id")
+  action      ApprovalAction
+  actorUserId String         @map("actor_user_id")
+  actorRole   Role           @map("actor_role")
+  comment     String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@map("hrm_approval_log")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  detail     String?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@map("hrm_audit_log")
+}
+
+// ─────────────────────────────────────────────
+// ການລາ ແລະ OT
+// ─────────────────────────────────────────────
+
+model LeaveType {
+  id            String  @id @default(cuid())
+  code          String  @unique
+  name          String
+  daysPerYear   Int     @default(0) @map("days_per_year")
+  isPaid        Boolean @default(true) @map("is_paid")
+  requiresProof Boolean @default(false) @map("requires_proof")
+  isActive      Boolean @default(true) @map("is_active")
+
+  requests LeaveRequest[]
+  balances LeaveBalance[]
+
+  @@map("hrm_leave_type")
+}
+
+model LeaveBalance {
+  id          String @id @default(cuid())
+  year        Int
+  entitled    Float  @default(0)
+  used        Float  @default(0)
+  carriedOver Float  @default(0) @map("carried_over")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  leaveTypeId String    @map("leave_type_id")
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([employeeCode, leaveTypeId, year])
+  @@map("hrm_leave_balance")
+}
+
+model LeaveRequest {
+  id        String        @id @default(cuid())
+  startDate DateTime      @map("start_date") @db.Date
+  endDate   DateTime      @map("end_date") @db.Date
+  days      Float
+  reason    String?
+  proofUrl  String?       @map("proof_url")
+  status    RequestStatus @default(PENDING_MANAGER)
+
+  rejectReason String? @map("reject_reason")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation("LeaveRequester", fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  leaveTypeId String    @map("leave_type_id")
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeCode])
+  @@index([status])
+  @@map("hrm_leave_request")
+}
+
+model OvertimeRequest {
+  id           String        @id @default(cuid())
+  workDate     DateTime      @map("work_date") @db.Date
+  startTime    String        @map("start_time")
+  endTime      String        @map("end_time")
+  hours        Float
+  rate         Float         @default(1.5)
+  rateType     String        @default("WORKDAY") @map("rate_type")
+  reason       String?
+  status       RequestStatus @default(PENDING_MANAGER)
+  rejectReason String?       @map("reject_reason")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation("OtRequester", fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeCode])
+  @@index([status])
+  @@map("hrm_overtime_request")
+}
+
+// ─────────────────────────────────────────────
+// ເງິນເດືອນ
+// ─────────────────────────────────────────────
+
+enum PayrollStatus {
+  DRAFT
+  CALCULATED
+  APPROVED
+  PAID
+  CLOSED
+}
+
+model PayrollPeriod {
+  id        String        @id @default(cuid())
+  year      Int
+  month     Int
+  startDate DateTime      @map("start_date") @db.Date
+  endDate   DateTime      @map("end_date") @db.Date
+  payDate   DateTime?     @map("pay_date") @db.Date
+  status    PayrollStatus @default(DRAFT)
+
+  payslips Payslip[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([year, month])
+  @@map("hrm_payroll_period")
+}
+
+enum PayItemKind {
+  EARNING
+  DEDUCTION
+}
+
+model Payslip {
+  id String @id @default(cuid())
+
+  baseSalary        Decimal @default(0) @map("base_salary") @db.Decimal(14, 2)
+  positionAllowance Decimal @default(0) @map("position_allowance") @db.Decimal(14, 2)
+  commission        Decimal @default(0) @db.Decimal(14, 2)
+  otAmount          Decimal @default(0) @map("ot_amount") @db.Decimal(14, 2)
+  bonus             Decimal @default(0) @db.Decimal(14, 2)
+  otherEarnings     Decimal @default(0) @map("other_earnings") @db.Decimal(14, 2)
+
+  socialSecurity  Decimal @default(0) @map("social_security") @db.Decimal(14, 2)
+  incomeTax       Decimal @default(0) @map("income_tax") @db.Decimal(14, 2)
+  lateDeduction   Decimal @default(0) @map("late_deduction") @db.Decimal(14, 2)
+  absentDeduction Decimal @default(0) @map("absent_deduction") @db.Decimal(14, 2)
+  otherDeductions Decimal @default(0) @map("other_deductions") @db.Decimal(14, 2)
+
+  grossPay       Decimal @default(0) @map("gross_pay") @db.Decimal(14, 2)
+  totalDeduction Decimal @default(0) @map("total_deduction") @db.Decimal(14, 2)
+  netPay         Decimal @default(0) @map("net_pay") @db.Decimal(14, 2)
+
+  note String?
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  periodId String        @map("period_id")
+  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  items PayslipItem[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([employeeCode, periodId])
+  @@map("hrm_payslip")
+}
+
+model PayslipItem {
+  id     String      @id @default(cuid())
+  kind   PayItemKind
+  name   String
+  amount Decimal     @db.Decimal(14, 2)
+
+  payslipId String  @map("payslip_id")
+  payslip   Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  @@index([payslipId])
+  @@map("hrm_payslip_item")
+}
+
+// ─────────────────────────────────────────────
+// ເລື່ອນຕຳແໜ່ງ / ໂອນຍ້າຍ / ປັບເງິນເດືອນ
+// ─────────────────────────────────────────────
+
+enum MovementType {
+  PROMOTION
+  TRANSFER_DEPT
+  TRANSFER_UNIT
+  SALARY_ADJUST
+  STATUS_CHANGE
+}
+
+model EmployeeMovement {
+  id            String       @id @default(cuid())
+  type          MovementType
+  effectiveDate DateTime     @map("effective_date") @db.Date
+
+  fromPositionCode   String? @map("from_position_code") @db.VarChar(20)
+  toPositionCode     String? @map("to_position_code") @db.VarChar(20)
+  fromDepartmentCode String? @map("from_department_code") @db.VarChar(20)
+  toDepartmentCode   String? @map("to_department_code") @db.VarChar(20)
+  fromUnitCode       String? @map("from_unit_code") @db.VarChar(20)
+  toUnitCode         String? @map("to_unit_code") @db.VarChar(20)
+
+  fromSalary Decimal?  @map("from_salary") @db.Decimal(14, 2)
+  toSalary   Decimal?  @map("to_salary") @db.Decimal(14, 2)
+  fromStatus HrStatus? @map("from_status")
+  toStatus   HrStatus? @map("to_status")
+
+  reason           String?
+  approvedByUserId String? @map("approved_by_user_id")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([employeeCode])
+  @@map("hrm_employee_movement")
+}
+
+// ─────────────────────────────────────────────
+// ຊັບສິນທີ່ມອບໃຫ້ພະນັກງານ
+// ─────────────────────────────────────────────
+
+enum AssetType {
+  COMPUTER
+  NOTEBOOK
+  PHONE
+  SIM_CARD
+  VEHICLE
+  UNIFORM
+  OTHER
+}
+
+model Asset {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  name         String
+  type         AssetType
+  serialNumber String?   @map("serial_number")
+  value        Decimal?  @db.Decimal(14, 2)
+  note         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("hrm_asset")
+}
+
+model AssetAssignment {
+  id           String    @id @default(cuid())
+  assignedDate DateTime  @map("assigned_date") @db.Date
+  returnedDate DateTime? @map("returned_date") @db.Date
+  condition    String?
+  note         String?
+
+  /// ລະຫັດຊັບສິນຂອງ SML (`as_asset.code`) — ບໍ່ໃສ່ FK ເພາະ SML sync ຈາກພາຍນອກ
+  assetCode String @map("asset_code") @db.VarChar(50)
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  @@index([employeeCode])
+  @@index([assetCode])
+  @@map("hrm_asset_assignment")
+}
+
+// ─────────────────────────────────────────────
+// ຮັບສະໝັກງານ (Recruitment) — ຕາຕະລາງໃໝ່ hrm_*
+//   hrm_job_posting     = ຕຳແໜ່ງທີ່ເປີດຮັບສະໝັກ (HR ສ້າງ)
+//   hrm_job_application = ໃບສະໝັກຈາກຜູ້ສະໝັກ (ສາທາລະນະ, ບໍ່ຕ້ອງ login)
+// ─────────────────────────────────────────────
+
+enum EmploymentType {
+  FULL_TIME // ເຕັມເວລາ
+  PART_TIME // ພາກສ່ວນເວລາ
+  CONTRACT // ສັນຍາຈ້າງ
+  INTERNSHIP // ຝຶກງານ
+}
+
+enum JobPostingStatus {
+  DRAFT // ຮ່າງ (ຍັງບໍ່ເຜີຍແຜ່)
+  OPEN // ເປີດຮັບສະໝັກ
+  CLOSED // ປິດຮັບສະໝັກ
+}
+
+enum ApplicationStatus {
+  NEW // ໃໝ່ — ຍັງບໍ່ໄດ້ກວດ
+  SCREENING // ກຳລັງກັ່ນຕອງເອກະສານ
+  INTERVIEW // ນັດສຳພາດ
+  OFFERED // ສະເໜີວຽກ
+  HIRED // ຮັບເຂົ້າເຮັດວຽກ
+  REJECTED // ບໍ່ຜ່ານ
+}
+
+/// ຕຳແໜ່ງທີ່ເປີດຮັບສະໝັກ — ສ້າງ/ຈັດການໂດຍ HR
+model JobPosting {
+  id             String           @id @default(cuid())
+  title          String // ຕຳແໜ່ງທີ່ຮັບສະໝັກ (ຂໍ້ຄວາມອິດສະຫຼະ)
+  slug           String           @unique // ໃຊ້ໃນ URL ສາທາລະນະ /careers/<slug>
+  departmentCode String?          @map("department_code") @db.VarChar(20)
+  positionCode   String?          @map("position_code") @db.VarChar(20)
+  employmentType EmploymentType   @default(FULL_TIME) @map("employment_type")
+  location       String? // ສະຖານທີ່ເຮັດວຽກ
+  openings       Int              @default(1) // ຈຳນວນທີ່ຕ້ອງການ
+  salaryRange    String?          @map("salary_range") // ຊ່ວງເງິນເດືອນ (ຂໍ້ຄວາມ)
+  description    String? // ໜ້າທີ່ຮັບຜິດຊອບ
+  requirements   String? // ຄຸນສົມບັດຜູ້ສະໝັກ
+  status         JobPostingStatus @default(DRAFT)
+  closingDate    DateTime?        @map("closing_date") @db.Date
+  postedByUserId String?          @map("posted_by_user_id")
+
+  applications JobApplication[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("hrm_job_posting")
+}
+
+/// ໃບສະໝັກງານ — ສົ່ງເຂົ້າມາຈາກໜ້າສາທາລະນະ (ບໍ່ຕ້ອງ login)
+model JobApplication {
+  id              String            @id @default(cuid())
+  fullname        String // ຊື່ ແລະ ນາມສະກຸນ
+  email           String?
+  phone           String // ເບີໂທຕິດຕໍ່
+  gender          Gender?
+  dob             DateTime?         @db.Date
+  address         String?
+  positionApplied String?           @map("position_applied") // ຕຳແໜ່ງ (ກໍລະນີສະໝັກທົ່ວໄປ ບໍ່ຜູກ posting)
+  education       String? // ລະດັບການສຶກສາ
+  experience      String? // ປະສົບການເຮັດວຽກ
+  expectedSalary  Decimal?          @map("expected_salary") @db.Decimal(14, 2)
+  coverLetter     String?           @map("cover_letter") // ຂໍ້ຄວາມແນະນຳຕົນເອງ
+  resumeUrl       String?           @map("resume_url") // ລິ້ງ CV (Google Drive ຯລຯ)
+  source          String? // ຮູ້ຂ່າວການຮັບສະໝັກຈາກໃສ
+  status          ApplicationStatus @default(NEW)
+  note            String? // ບັນທຶກພາຍໃນຂອງ HR
+
+  jobPostingId String?     @map("job_posting_id")
+  jobPosting   JobPosting? @relation(fields: [jobPostingId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([jobPostingId])
+  @@map("hrm_job_application")
+}
+
+// ─────────────────────────────────────────────
+// ລົງເວລາເຂົ້າ-ອອກ (ຜ່ານ LINE mini app)
+// ─────────────────────────────────────────────
+
+model Attendance {
+  id            String    @id @default(cuid())
+  workDate      DateTime  @map("work_date") @db.Date
+  checkInAt     DateTime? @map("check_in_at") @db.Timestamp(6)
+  checkOutAt    DateTime? @map("check_out_at") @db.Timestamp(6)
+  lateMinutes   Int       @default(0) @map("late_minutes")
+  workedMinutes Int?      @map("worked_minutes")
+  checkInLat    Float?    @map("check_in_lat")
+  checkInLng    Float?    @map("check_in_lng")
+  checkOutLat   Float?    @map("check_out_lat")
+  checkOutLng   Float?    @map("check_out_lng")
+  source        String    @default("LINE")
+  note          String?
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation("AttendanceEmployee", fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([employeeCode, workDate])
+  @@index([workDate])
+  @@map("hrm_attendance")
+}
+
+enum AttendanceCorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model AttendanceCorrectionRequest {
+  id                  String                     @id @default(cuid())
+  workDate            DateTime                   @map("work_date") @db.Date
+  requestedCheckInAt  DateTime?                  @map("requested_check_in_at") @db.Timestamp(6)
+  requestedCheckOutAt DateTime?                  @map("requested_check_out_at") @db.Timestamp(6)
+  reason              String
+  status              AttendanceCorrectionStatus @default(PENDING)
+  requesterUserId     String                     @map("requester_user_id")
+  reviewedByUserId    String?                    @map("reviewed_by_user_id")
+  reviewedAt          DateTime?                  @map("reviewed_at")
+  reviewNote          String?                    @map("review_note")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeCode, workDate])
+  @@index([status, createdAt])
+  @@map("hrm_attendance_correction_request")
+}
+
+// ─────────────────────────────────────────────
+// ການຕັ້ງຄ່າ HRM ແລະ ວັນພັກ
+// ─────────────────────────────────────────────
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("hrm_setting")
+}
+
+model PublicHoliday {
+  id        String   @id @default(cuid())
+  name      String
+  date      DateTime @unique @db.Date
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([date])
+  @@map("hrm_public_holiday")
+}
+
+enum WorkScheduleType {
+  WEEKDAYS
+  ROTATING
+}
+
+model WorkShift {
+  id               String           @id @default(cuid())
+  code             String           @unique
+  name             String
+  startTime        String           @map("start_time")
+  endTime          String           @map("end_time")
+  breakMinutes     Int              @default(0) @map("break_minutes")
+  lateGraceMinutes Int              @default(15) @map("late_grace_minutes")
+  isActive         Boolean          @default(true) @map("is_active")
+  scheduleType     WorkScheduleType @default(WEEKDAYS) @map("schedule_type")
+  workDays         String           @default("1,2,3,4,5") @map("work_days")
+
+  assignments EmployeeShiftAssignment[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("hrm_work_shift")
+}
+
+model EmployeeShiftAssignment {
+  id            String    @id @default(cuid())
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  note          String?
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  shiftId String    @map("shift_id")
+  shift   WorkShift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([employeeCode, effectiveFrom])
+  @@index([employeeCode, effectiveFrom, effectiveTo])
+  @@index([shiftId])
+  @@map("hrm_employee_shift_assignment")
+}
+
+model EmployeeDayOff {
+  id              String   @id @default(cuid())
+  date            DateTime @db.Date
+  note            String?
+  createdByUserId String?  @map("created_by_user_id")
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([employeeCode, date])
+  @@index([date])
+  @@index([employeeCode, date])
+  @@map("hrm_employee_day_off")
+}
+
+// ─────────────────────────────────────────────
+// ຫົວໜ້າຂອງແຕ່ລະໜ່ວຍໂຄງສ້າງ (ຝ່າຍ/ພະແນກ/ໜ່ວຍງານ)
+// ແຍກຈາກ "ສັງກັດ" ຂອງພະນັກງານ — 1 ຄົນເປັນຫົວໜ້າໄດ້ຫຼາຍໜ່ວຍ, 1 ໜ່ວຍມີຫົວໜ້າ 1 ຄົນ
+// ─────────────────────────────────────────────
+
+enum OrgScope {
+  DIVISION
+  DEPARTMENT
+  UNIT
+}
+
+model OrgHead {
+  scope        OrgScope
+  code         String   @db.VarChar(20)
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation("OrgHead", fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  assignedByUserId String?  @map("assigned_by_user_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@id([scope, code])
+  @@index([employeeCode])
+  @@map("hrm_org_head")
+}
+
+/// ຂັ້ນຕອນອະນຸມັດ trip (ຮຽງລຳດັບ, ເພີ່ມ/ຫຼຸດໄດ້) — global config
+/// approverType: UNIT_HEAD | DEPT_HEAD | DIVISION_HEAD | SPECIFIC
+///  - *_HEAD → resolve ຈາກ OrgHead ຕາມ node ຂອງຜູ້ຮ້ອງ
+///  - SPECIFIC → specificEmployeeCode (ເຊັ່ນ ຜູ້ຈັດການ HR)
+model TripApprovalStep {
+  id           String @id @default(cuid())
+  stepOrder    Int    @map("step_order")
+  approverType String @map("approver_type")
+
+  specificEmployeeCode String?   @map("specific_employee_code") @db.VarChar(20)
+  specificEmployee     Employee? @relation("TripApprovalStepApprover", fields: [specificEmployeeCode], references: [code], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([stepOrder])
+  @@map("hrm_trip_approval_step")
+}
+
+// ─────────────────────────────────────────────
+// ປະເມີນຜົນງານ (ແບບງ່າຍ) — ຮອບ + ຄະແນນ 1–100 + ເກຣດ
+// ─────────────────────────────────────────────
+
+enum AppraisalStatus {
+  PENDING
+  COMPLETED
+}
+
+model AppraisalCycle {
+  id     String  @id @default(cuid())
+  name   String
+  year   Int
+  isOpen Boolean @default(true) @map("is_open")
+
+  appraisals Appraisal[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("hrm_appraisal_cycle")
+}
+
+model Appraisal {
+  id           String          @id @default(cuid())
+  status       AppraisalStatus @default(PENDING)
+  score        Float?
+  grade        String?
+  strengths    String?
+  improvements String?
+  comment      String?
+  evaluatedAt  DateTime?       @map("evaluated_at")
+
+  cycleId String         @map("cycle_id")
+  cycle   AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation("AppraisalEmployee", fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  evaluatorCode String?   @map("evaluator_code") @db.VarChar(20)
+  evaluator     Employee? @relation("AppraisalEvaluator", fields: [evaluatorCode], references: [code])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([cycleId, employeeCode])
+  @@index([evaluatorCode])
+  @@map("hrm_appraisal")
+}
+
+// ─────────────────────────────────────────────
+// ຈັດການລົດ — ວາງແຜນນຳໃຊ້ລົດ (trip) ອອກຕະຫຼາດ ລາຍວັນ/ລາຍທິບ
+// ─────────────────────────────────────────────
+
+enum TripStatus {
+  PLANNED
+  DEPARTED
+  RETURNED
+  CANCELLED
+}
+
+/// ລົດ ແລະ ປະເພດ ຈາກ ERP (app_car_*) — read-only, ຈັດການຢູ່ລະບົບ ERP ບໍ່ແມ່ນ HRM
+model CarVehicle {
+  id             BigInt  @id
+  plateNo        String  @map("plate_no")
+  name           String
+  status         String?
+  currentMileage Int?    @map("current_mileage")
+  gpsImei        String? @map("gps_imei")
+  departmentCode String? @map("department_code")
+  vehicleTypeId  BigInt? @map("vehicle_type_id")
+
+  @@map("app_car_vehicles")
+}
+
+model CarVehicleType {
+  id       BigInt  @id
+  name     String
+  isActive Boolean @default(true) @map("is_active")
+
+  @@map("app_car_vehicle_types")
+}
+
+/// ຂໍ້ມູນ HRM ເພີ່ມເຕີມຂອງລົດ ERP — ຜູກ vehicle_id ແບບ soft ref.
+/// ບໍ່ສ້າງ FK ເພາະ app_car_vehicles ເປັນຕາຕະລາງທີ່ ERP ເປັນເຈົ້າຂອງ.
+model VehicleProfile {
+  vehicleId  BigInt   @id @map("vehicle_id")
+  branchCode String?  @map("branch_code") @db.VarChar(20)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([branchCode])
+  @@map("hrm_vehicle_profile")
+}
+
+/// ຂໍ້ມູນລົດຈາກ Lao GPS Open API ທີ່ app_car_vehicles ບໍ່ມີບ່ອນເກັບ.
+/// ຜູກດ້ວຍ imei — ຊິງຄ໌ທັບໄດ້ຕະຫຼອດ ໂດຍບໍ່ແຕະຕາຕະລາງ ERP.
+model VehicleGpsInfo {
+  imei         String    @id @db.VarChar(32)
+  gpsVehicleId Int?      @map("gps_vehicle_id")
+  plate        String?
+  carModel     String?   @map("car_model")
+  category     String?
+  province     String?
+  chassis      String?
+  asset        String?
+  deviceModel  String?   @map("device_model")
+  sim          String?
+  active       Boolean   @default(true)
+  hasCamera    Boolean   @default(false) @map("has_camera")
+  overspeedKmh Float?    @map("overspeed_kmh")
+  parkLimitMin Float?    @map("park_limit_min")
+  tankLitre    Float?    @map("tank_litre")
+  kmPerLitre   Float?    @map("km_per_litre")
+  fuelMethod   String?   @map("fuel_method")
+  fuelReason   String?   @map("fuel_reason")
+  expireDate   DateTime? @map("expire_date")
+  registeredAt DateTime? @map("registered_at")
+  lastSeenAt   DateTime? @map("last_seen_at")
+  syncedAt     DateTime  @default(now()) @map("synced_at")
+
+  @@index([expireDate])
+  @@index([active])
+  @@map("hrm_vehicle_gps")
+}
+
+/// ລູກຄ້າ/ຮ້ານຄ້າ ຈາກ ERP (ar_customer) — read-only. status=0 ໃຊ້ໄດ້, status=1 ຫ້າມໃຊ້
+model ArCustomer {
+  code      String  @id
+  name1     String? @map("name_1")
+  telephone String?
+  province  String?
+  address   String?
+  status    Int?    @db.SmallInt
+
+  @@map("ar_customer")
+}
+
+model VehicleTrip {
+  id                String     @id @default(cuid())
+  date              DateTime   @db.Date
+  endDate           DateTime   @map("end_date") @db.Date
+  tripNo            Int        @map("trip_no")
+  destination       String
+  departTime        String?    @map("depart_time")
+  returnTime        String?    @map("return_time")
+  status            TripStatus @default(PLANNED)
+  note              String?
+  tripType          String     @default("GENERAL") @map("trip_type")
+  workflowStatus    String     @default("PLANNED") @map("workflow_status")
+  salesTarget       Decimal    @default(0) @map("sales_target") @db.Decimal(14, 2)
+  openingOdometer   Int?       @map("opening_odometer")
+  closingOdometer   Int?       @map("closing_odometer")
+  openingFuel       Float?     @map("opening_fuel")
+  closingFuel       Float?     @map("closing_fuel")
+  departurePhotoUrl String?    @map("departure_photo_url") // ຮູບຮັບລົດ ກ່ອນອອກ
+  returnPhotoUrl    String?    @map("return_photo_url") // ຮູບສົ່ງລົດ ຕອນກັບ
+  startedAt         DateTime?  @map("started_at")
+  returnedAt        DateTime?  @map("returned_at")
+  closedAt          DateTime?  @map("closed_at")
+
+  // null = ຍັງບໍ່ໄດ້ຈັດລົດ (ຄຳຮ້ອງຈາກ LINE); = app_car_vehicles.id (soft ref, ບໍ່ມີ FK)
+  vehicleId String? @map("vehicle_id")
+
+  driverCode String?   @map("driver_code") @db.VarChar(20)
+  driver     Employee? @relation("TripDriver", fields: [driverCode], references: [code])
+
+  members       TripMember[]
+  saleCustomers SaleTripCustomer[]
+  saleProducts  SaleTripProduct[]
+  saleOrders    SaleTripOrder[]
+  salePayments  SaleTripPayment[]
+  saleExpenses  SaleTripExpense[]
+
+  // ຮ້ອງຂໍ + ອະນຸມັດ: approvedAt == null → ຄຳຮ້ອງລໍຖ້າ; ຕັ້ງແລ້ວ → ອະນຸມັດ (ຈັດລົດແລ້ວ)
+  requestedByCode  String?   @map("requested_by_code") @db.VarChar(20)
+  requestedBy      Employee? @relation("TripRequester", fields: [requestedByCode], references: [code])
+  approvalLevel    Int       @default(0) @map("approval_level") // ຈຳນວນຂັ້ນທີ່ຜ່ານການອະນຸມັດແລ້ວ (ອະນຸມັດ "ແຜນ")
+  approvedAt       DateTime? @map("approved_at") // ຢືນຢັນ (ຄົບທັງ ແຜນ + ລົດ)
+  approvedByUserId String?   @map("approved_by_user_id")
+  rejectReason     String?   @map("reject_reason")
+
+  // ອະນຸມັດ "ລົດ" ຕ່າງຫາກ (ໂດຍຜູ້ມີສິດອະນຸມັດລົດ) + ຜູ້ຢືມລົດ
+  isVehicleBorrower   Boolean   @default(false) @map("is_vehicle_borrower") // ຜູ້ຮ້ອງຕິກ "ຂ້ອຍເປັນຜູ້ຢືມລົດ"
+  vehicleApprovedAt   DateTime? @map("vehicle_approved_at")
+  vehicleApprovedBy   String?   @map("vehicle_approved_by") @db.VarChar(20)
+  vehicleRejectReason String?   @map("vehicle_reject_reason")
+
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([date, vehicleId, tripNo])
+  @@index([date])
+  @@index([endDate])
+  @@map("hrm_vehicle_trip")
+}
+
+/// ໃບຂໍນຳໃຊ້ລົດ (ຝ່າຍຂາຍ) — ລວມຫຼາຍແຜນ (trip) ເປັນເອກະສານດຽວ ເພື່ອບັນທຶກ + ສົ່ງໄປອະນຸມັດ
+model SaleVehicleRequest {
+  id              String    @id @default(cuid())
+  requestNo       String    @map("request_no")
+  requestedByCode String    @map("requested_by_code") @db.VarChar(20)
+  tripIds         String[]  @map("trip_ids")
+  note            String?
+  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy      String?   @map("approved_by") @db.VarChar(20)
+  approvedAt      DateTime? @map("approved_at")
+  rejectReason    String?   @map("reject_reason")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([requestedByCode])
+  @@index([status])
+  @@map("hrm_sale_vehicle_request")
+}
+
+/// ຜູ້ມີສິດ "ອະນຸມັດລົດ" (global) — ຄົນໃນລາຍການນີ້ ອະນຸມັດການໃຊ້ລົດຂອງທຸກກຸ່ມໄດ້
+model VehicleApprover {
+  employeeCode String   @id @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("hrm_vehicle_approver")
+}
+
+model SaleTripCustomer {
+  id           String    @id @default(cuid())
+  sequence     Int       @default(1)
+  customerCode String?   @map("customer_code")
+  customerName String    @map("customer_name")
+  phone        String?
+  address      String?
+  latitude     Float?
+  longitude    Float?
+  plannedAt    DateTime? @map("planned_at")
+  checkedInAt  DateTime? @map("checked_in_at")
+  checkedOutAt DateTime? @map("checked_out_at")
+  status       String    @default("PLANNED")
+  note         String?
+
+  tripId String          @map("trip_id")
+  trip   VehicleTrip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  orders SaleTripOrder[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([tripId, sequence])
+  @@map("hrm_sale_trip_customer")
+}
+
+model SaleTripProduct {
+  id          String  @id @default(cuid())
+  productCode String  @map("product_code")
+  productName String  @map("product_name")
+  unit        String?
+  unitPrice   Decimal @default(0) @map("unit_price") @db.Decimal(14, 2)
+  loadedQty   Decimal @default(0) @map("loaded_qty") @db.Decimal(14, 3)
+  soldQty     Decimal @default(0) @map("sold_qty") @db.Decimal(14, 3)
+  sampleQty   Decimal @default(0) @map("sample_qty") @db.Decimal(14, 3)
+  returnedQty Decimal @default(0) @map("returned_qty") @db.Decimal(14, 3)
+  damagedQty  Decimal @default(0) @map("damaged_qty") @db.Decimal(14, 3)
+
+  tripId String      @map("trip_id")
+  trip   VehicleTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tripId, productCode])
+  @@index([tripId])
+  @@map("hrm_sale_trip_product")
+}
+
+model SaleTripOrder {
+  id           String   @id @default(cuid())
+  orderNo      String   @unique @map("order_no")
+  customerName String   @map("customer_name")
+  paymentType  String   @default("CASH") @map("payment_type")
+  subtotal     Decimal  @default(0) @db.Decimal(14, 2)
+  discount     Decimal  @default(0) @db.Decimal(14, 2)
+  tax          Decimal  @default(0) @db.Decimal(14, 2)
+  total        Decimal  @default(0) @db.Decimal(14, 2)
+  paidAmount   Decimal  @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  status       String   @default("CONFIRMED")
+  note         String?
+  soldAt       DateTime @default(now()) @map("sold_at")
+
+  tripId     String              @map("trip_id")
+  trip       VehicleTrip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  customerId String?             @map("customer_id")
+  customer   SaleTripCustomer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items      SaleTripOrderItem[]
+  payments   SaleTripPayment[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([tripId, soldAt])
+  @@index([customerId])
+  @@map("hrm_sale_trip_order")
+}
+
+model SaleTripOrderItem {
+  id          String  @id @default(cuid())
+  productCode String  @map("product_code")
+  productName String  @map("product_name")
+  unit        String?
+  quantity    Decimal @db.Decimal(14, 3)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(14, 2)
+  discount    Decimal @default(0) @db.Decimal(14, 2)
+  total       Decimal @db.Decimal(14, 2)
+
+  orderId String        @map("order_id")
+  order   SaleTripOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("hrm_sale_trip_order_item")
+}
+
+model SaleTripPayment {
+  id         String   @id @default(cuid())
+  method     String
+  amount     Decimal  @db.Decimal(14, 2)
+  reference  String?
+  proofUrl   String?  @map("proof_url")
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  tripId  String         @map("trip_id")
+  trip    VehicleTrip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  orderId String?        @map("order_id")
+  order   SaleTripOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tripId, receivedAt])
+  @@index([orderId])
+  @@map("hrm_sale_trip_payment")
+}
+
+model SaleTripExpense {
+  id              String   @id @default(cuid())
+  type            String
+  amount          Decimal  @db.Decimal(14, 2)
+  note            String?
+  receiptUrl      String?  @map("receipt_url")
+  incurredAt      DateTime @default(now()) @map("incurred_at")
+  submittedByCode String?  @map("submitted_by_code") @db.VarChar(20)
+
+  tripId String      @map("trip_id")
+  trip   VehicleTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tripId, incurredAt])
+  @@map("hrm_sale_trip_expense")
+}
+
+model TripMember {
+  tripId String      @map("trip_id")
+  trip   VehicleTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  employee     Employee @relation(fields: [employeeCode], references: [code], onDelete: Cascade)
+
+  @@id([tripId, employeeCode])
+  @@index([employeeCode])
+  @@map("hrm_trip_member")
+}
+
+/// ສິດການເຂົ້າໃຊ້ເມນູ ຕໍ່ role — ມີແຖວ = ອະນຸຍາດ.
+/// role ທີ່ບໍ່ມີແຖວໃດເລີຍ ຈະຕົກໄປໃຊ້ຄ່າເລີ່ມຕົ້ນໃນ src/lib/menu.ts
+model MenuPermission {
+  role      String
+  menuKey   String   @map("menu_key")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@id([role, menuKey])
+  @@index([role])
+  @@map("hrm_menu_permission")
+}
+
+/// ສິດເມນູ "ຕໍ່ຜູ້ໃຊ້" — override ສິດຂອງ role ເປັນລາຍຄົນ.
+/// ຜູ້ໃຊ້ທີ່ບໍ່ມີແຖວໃດເລີຍ = ໃຊ້ສິດຕາມ role ຕາມປົກກະຕິ
+model UserMenuPermission {
+  userId    String   @map("user_id")
+  menuKey   String   @map("menu_key")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "hrm_user_menu_user_fk")
+
+  @@id([userId, menuKey])
+  @@index([userId])
+  @@map("hrm_user_menu")
+}
+
+/// ທະບຽນຊັບສິນຂອງ SML — **ແຫຼ່ງຫຼັກ** (623 ລາຍການ). HRM ອ່ານ ແລະ ແກ້ໄດ້.
+/// ໝາຍເຫດ: `name_eng_1` ຖືກ SML ໃຊ້ເກັບ **ຜູ້ຖືຄອງ** ບໍ່ແມ່ນຊື່ພາສາອັງກິດ.
+model SmlAsset {
+  code           String   @id @db.VarChar(50)
+  name           String?  @map("name_1")
+  holderName     String?  @map("name_eng_1")
+  unitCode       String?  @map("unit_code")
+  typeCode       String?  @map("as_type")
+  locationCode   String?  @map("as_location")
+  departmentCode String?  @map("department_code")
+  branchCode     String?  @map("branch_code")
+  brand          String?  @map("as_brand")
+  modelInfo      String?  @map("as_model_info")
+  serialNo       String?  @map("as_sn")
+  macAddress     String?  @map("mac_address")
+  category       String?  @map("as_category")
+  remark         String?
+  status         Int?     @db.SmallInt
+  createdAt      DateTime @default(now()) @map("create_date_time_now")
+
+  @@index([typeCode])
+  @@index([branchCode])
+  @@map("as_asset")
+}
+
+model SmlAssetType {
+  code   String  @id @db.VarChar(50)
+  name   String? @map("name_1")
+  status Int?    @db.SmallInt
+
+  @@map("as_asset_type")
+}
+
+model SmlAssetLocation {
+  code   String  @id @db.VarChar(50)
+  name   String? @map("name_1")
+  status Int?    @db.SmallInt
+
+  @@map("as_asset_location")
+}

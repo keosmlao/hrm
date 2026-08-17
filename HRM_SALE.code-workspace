@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../SALE"
+		},
+		{
+			"path": "../ODG2026/tms"
+		},
+		{
+			"path": "../ODSS/odss-next"
+		},
+		{
+			"path": "../PRODUCTMANAGERENT"
+		},
+		{
+			"path": "../wms-app"
+		},
+		{
+			"path": "../ODG2026/web_sale_order"
+		}
+	]
+}

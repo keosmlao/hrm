@@ -11,6 +11,9 @@ import { TripEditActions } from "../../trip-edit-actions";
 import { advanceSaleTrip } from "../../sale-actions";
 import { isSaleStockBalanced } from "@/lib/sale-trip";
 import { tripScheduleLabel } from "@/lib/trip";
+import { laoNaiveToUtc } from "@/lib/fuel-events";
+import { tripFuelFromCache, type TripFuelReport } from "@/lib/fuel-cache";
+import TripFuelCard from "./trip-fuel";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +39,17 @@ export default async function SaleTripPage({ params }: { params: Promise<{ id: s
   const paid = trip.salePayments.reduce((sum, row) => sum + Number(row.amount), 0);
   const expenses = trip.saleExpenses.reduce((sum, row) => sum + Number(row.amount), 0);
   const target = Number(trip.salesTarget);
+  // ⛽ ນ້ຳມັນ GPS ຂອງ trip — ສະເພາະ SALE trip ທີ່ອອກແລ້ວ ແລະ ລົດມີ IMEI (ຊ່ວງ started_at..returned_at/ຕອນນີ້)
+  let fuel: TripFuelReport | null = null;
+  const imei = vehicle?.gpsImei?.trim();
+  if (trip.tripType === "SALE" && imei && trip.workflowStatus !== "PLANNED" && trip.status !== "CANCELLED") {
+    const from = laoNaiveToUtc(trip.startedAt ?? trip.date);
+    const to = laoNaiveToUtc(trip.returnedAt ?? new Date(trip.endDate.getTime() + 86_400_000));
+    // ຈາກ cache ໃນ DB (cron gps:sync-fuel) — ບໍ່ເອີ້ນ Lao GPS ຕອນເປີດໜ້າ (ຊ້າ 30–200 ວິ)
+    fuel = to > from ? await tripFuelFromCache(imei, from, to).catch(() => null) : null;
+  }
+  // ບິນນ້ຳມັນ — HRM ບັນທຶກ type "FUEL", ແອັບ/ເວັບ SALE ບັນທຶກ "ນ້ຳມັນ"
+  const fuelBills = trip.saleExpenses.filter((e) => e.type === "FUEL" || e.type === "ນ້ຳມັນ");
   const stockBalanced = trip.saleProducts.length > 0 && trip.saleProducts.every((p) => isSaleStockBalanced({ loadedQty: Number(p.loadedQty), soldQty: Number(p.soldQty), sampleQty: Number(p.sampleQty), returnedQty: Number(p.returnedQty), damagedQty: Number(p.damagedQty) }));
 
   return <>
@@ -52,6 +66,8 @@ export default async function SaleTripPage({ params }: { params: Promise<{ id: s
           <HandoverPhoto label="ຮັບລົດ (ກ່ອນອອກ)" url={trip.departurePhotoUrl} mile={trip.openingOdometer} />
           <HandoverPhoto label="ສົ່ງລົດ (ຕອນກັບ)" url={trip.returnPhotoUrl} mile={trip.closingOdometer} />
         </div>}</Card>
+
+      {fuel && <TripFuelCard fuel={fuel} plate={vehicle?.plateNo ?? imei ?? ""} fuelBills={fuelBills.length} billTotal={fuelBills.reduce((s, e) => s + Number(e.amount), 0)} />}
 
       <Card><h2 className="mb-4 font-semibold">ແຜນລູກຄ້າ ({trip.saleCustomers.length})</h2>{canEdit && trip.workflowStatus !== "CLOSED" && <div className="mb-5"><SaleCustomerForm tripId={trip.id} sequence={trip.saleCustomers.length + 1} /></div>}<Table><thead><tr><Th>#</Th><Th>ລູກຄ້າ</Th><Th>ເບີໂທ</Th><Th>ທີ່ຢູ່</Th><Th>Check-in</Th><Th>ສະຖານະ</Th><Th></Th></tr></thead><tbody>{trip.saleCustomers.length === 0 && <EmptyRow colSpan={7} text="ຍັງບໍ່ມີລູກຄ້າ" />}{trip.saleCustomers.map((c) => <SaleCustomerRow key={c.id} tripId={trip.id} canEdit={canEdit && trip.workflowStatus !== "CLOSED"} customer={{ id: c.id, sequence: c.sequence, customerCode: c.customerCode, customerName: c.customerName, phone: c.phone, address: c.address, latitude: c.latitude, longitude: c.longitude, note: c.note, status: c.status, checkedInAt: c.checkedInAt ? c.checkedInAt.toISOString() : null }} />)}</tbody></Table></Card>
 

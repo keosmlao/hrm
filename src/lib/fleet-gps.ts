@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "./prisma";
 import { getFuel } from "./laogps";
 import { fuelNorm, type FuelDay, type FuelNorm } from "./gps-track";
+import { fuelDailyRows, type FuelDailyRow } from "./fuel-cache";
 
 /**
  * ຕົວຊ່ວຍລະຫວ່າງ HRM ກັບ Lao GPS Open API.
@@ -90,66 +91,42 @@ export type VehicleFuelNorm = FuelNorm & {
 };
 
 /**
- * ມາດຕະຖານການກິນນ້ຳມັນຂອງແຕ່ລະຄັນ ຈາກຂໍ້ມູນລາຍວັນຫຼາຍເດືອນ.
+ * ມາດຕະຖານການກິນນ້ຳມັນຂອງແຕ່ລະຄັນ ຈາກຂໍ້ມູນລາຍວັນໃນ **cache** (`hrm_vehicle_fuel_daily`).
+ *
+ * ອ່ານ DB ຄຳຂໍດຽວ (ms) — ບໍ່ແຕະ Open API. ຄົນເອີ້ນ API ຄື cron `npm run gps:sync-fuel`
+ * (ເມື່ອກ່ອນໜ້ານີ້ດຶງສົດ ລົດ × ເດືອນ ຄຳຂໍ ຈຶ່ງລໍເປັນນາທີ).
+ * ວັນທີ່ cache ຍັງບໍ່ມີ ຈະບໍ່ຖືກນັບ — ໃຫ້ backfill ດ້ວຍ `npm run gps:sync-fuel -- --days=90`.
  *
  * ⚠ ເຊື່ອຖືໄດ້ສະເພາະລົດແບບ **`sensor`**. ລົດແບບ `rate` ຄິດນ້ຳມັນຈາກ
  * ອັດຕາທີ່ຕັ້ງໄວ້ຢູ່ແລ້ວ ຈຶ່ງເອົາມາຄິດ ກມ/ລິດ ຄືນເປັນການວົນຊ້ຳ ບໍ່ແມ່ນການວັດ.
  * ຜູ້ເອີ້ນຕ້ອງແຍກສະແດງໃຫ້ຊັດ.
- *
- * ຄຳຂໍ = ຈຳນວນລົດ × ຈຳນວນເດືອນ (endpoint ຈຳກັດ 31 ວັນ/ຄຳຂໍ).
  */
 export async function fleetFuelNorms(
   imeis: string[],
-  monthsISO: string[],
-  opts: { minKm?: number; concurrency?: number } = {},
+  range: { from: string; to: string },
+  opts: { minKm?: number } = {},
 ): Promise<Map<string, VehicleFuelNorm>> {
-  const limit = opts.concurrency ?? 3;
   const out = new Map<string, VehicleFuelNorm>();
-  const queue = [...imeis];
+  if (imeis.length === 0) return out;
 
-  async function worker() {
-    for (;;) {
-      const imei = queue.shift();
-      if (!imei) return;
-      const rows: FuelDay[] = [];
-      let method: string | null = null;
-      let configured: number | null = null;
+  const rows = await fuelDailyRows(range.from, range.to, imeis);
+  const byImei = new Map<string, FuelDailyRow[]>();
+  for (const r of rows) (byImei.get(r.imei) ?? byImei.set(r.imei, []).get(r.imei)!).push(r);
 
-      for (const m of monthsISO) {
-        const [y, mm] = m.split("-").map(Number);
-        const last = new Date(Date.UTC(y, mm, 0)).getUTCDate();
-        try {
-          const f = await getFuel(imei, { from: `${m}-01`, to: `${m}-${last}`, daily: true });
-          method ??= f.fuel_method;
-          configured ??= f.km_per_litre;
-          for (const d of f.daily ?? []) {
-            if (d.fuel_used_litre != null) {
-              rows.push({ day: d.day.slice(0, 10), km: d.distance_km ?? 0, litre: d.fuel_used_litre });
-            }
-          }
-        } catch {
-          // ເດືອນນີ້ດຶງບໍ່ໄດ້ → ຄິດຈາກເດືອນທີ່ເຫຼືອ
-        }
-      }
-      out.set(imei, {
-        imei,
-        method,
-        configuredKmPerLitre: configured,
-        ...fuelNorm(rows, { minKm: opts.minKm }),
-      });
-    }
+  for (const [imei, list] of byImei) {
+    // ວິທີວັດ/ອັດຕາທີ່ຕັ້ງໄວ້ — ເອົາຄ່າຫຼ້າສຸດທີ່ບໍ່ null (fuelDailyRows ຮຽງ day ຂຶ້ນຢູ່ແລ້ວ)
+    const latest = [...list].reverse();
+    const days: FuelDay[] = list
+      .filter((r) => r.fuel_used_litre != null)
+      .map((r) => ({ day: r.day, km: r.distance_km, litre: r.fuel_used_litre! }));
+    out.set(imei, {
+      imei,
+      method: latest.find((r) => r.fuel_method)?.fuel_method ?? null,
+      configuredKmPerLitre: latest.find((r) => r.km_per_litre != null)?.km_per_litre ?? null,
+      ...fuelNorm(days, { minKm: opts.minKm }),
+    });
   }
-  await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, worker));
   return out;
-}
-
-/** ເດືອນຍ້ອນຫຼັງ n ເດືອນ ນັບຈາກເດືອນປັດຈຸບັນ (ເກົ່າ → ໃໝ່) */
-export function recentMonths(n: number): string[] {
-  const now = new Date();
-  return Array.from({ length: n }, (_, i) => {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (n - 1 - i), 1));
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  });
 }
 
 // Logic ບໍລິສຸດຢູ່ `gps-track.ts` (ບໍ່ມີ server-only ຈຶ່ງ test ໄດ້) — re-export

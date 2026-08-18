@@ -1,26 +1,34 @@
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { Badge, EmptyRow, PageHeader, StatCard, Table, Td, Th, inputClass } from "@/components/ui";
-import { fleetFuelNorms, num, recentMonths } from "@/lib/fleet-gps";
+import { fleetFuelNorms, laoDaysAgo, laoToday, num } from "@/lib/fleet-gps";
+import { fuelCacheCoverage, fuelCacheUpdatedAt } from "@/lib/fuel-cache";
 import { laoGpsConfigured } from "@/lib/laogps";
-import { GpsNotConfigured } from "../gps-filter";
+import { GpsNotConfigured, GpsNotice } from "../gps-filter";
 
 export const dynamic = "force-dynamic";
 
-/** ຝ່າຍຂາຍ — ຄ່າເລີ່ມຕົ້ນ (ລົດໜ້ອຍ ດຶງໄວ) */
+/**
+ * ອ່ານຈາກ cache ໃນ DB (`hrm_vehicle_fuel_daily` — cron `npm run gps:sync-fuel`) ຈຶ່ງເປີດໄດ້ໃນ ms.
+ * ເມື່ອກ່ອນດຶງ Open API ສົດ ລົດ × ເດືອນ ຄຳຂໍ (ຫຼາຍນາທີ) — ຢ່າເອົາກັບຄືນ.
+ */
+
+/** ຝ່າຍຂາຍ — ຄ່າເລີ່ມຕົ້ນ */
 const DEFAULT_DIVISION = "200";
 /** ຕ້ອງມີຢ່າງໜ້ອຍເທົ່ານີ້ວັນ ຈຶ່ງຖືວ່າມາດຕະຖານເຊື່ອຖືໄດ້ */
 const MIN_DAYS = 10;
+const DAY_CHOICES = [30, 60, 90, 180];
 
 export default async function FuelNormPage({
   searchParams,
 }: {
-  searchParams: Promise<{ div?: string; months?: string }>;
+  searchParams: Promise<{ div?: string; days?: string; months?: string }>;
 }) {
   await requireRole("ADMIN", "HR", "MANAGER", "EXECUTIVE");
   const q = await searchParams;
   const divisionCode = q.div ?? DEFAULT_DIVISION;
-  const monthCount = Math.min(6, Math.max(1, Number(q.months) || 3));
+  // `months` = ລິ້ງເກົ່າ (1–6 ເດືອນ) — ແປງເປັນວັນ ເພື່ອບໍ່ໃຫ້ bookmark ເສຍ
+  const dayCount = Math.min(365, Math.max(7, Number(q.days) || (Number(q.months) || 0) * 30 || 90));
 
   const header = (
     <PageHeader
@@ -30,9 +38,14 @@ export default async function FuelNormPage({
   );
   if (!laoGpsConfigured()) return <>{header}<GpsNotConfigured /></>;
 
-  const [divisions, departments] = await Promise.all([
+  const to = laoToday();
+  const from = laoDaysAgo(dayCount - 1);
+
+  const [divisions, departments, coverage, cacheAt] = await Promise.all([
     prisma.division.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { code: true, nameLo: true } }),
     prisma.department.findMany({ select: { code: true, divisionCode: true } }),
+    fuelCacheCoverage(),
+    fuelCacheUpdatedAt(),
   ]);
   const deptCodes = departments.filter((d) => d.divisionCode === divisionCode).map((d) => d.code);
 
@@ -46,11 +59,7 @@ export default async function FuelNormPage({
     orderBy: { plateNo: "asc" },
   });
 
-  const months = recentMonths(monthCount);
-  const norms = await fleetFuelNorms(
-    vehicles.map((v) => v.gpsImei!.trim()),
-    months,
-  );
+  const norms = await fleetFuelNorms(vehicles.map((v) => v.gpsImei!.trim()), { from, to });
 
   const rows = vehicles
     .map((v) => ({ v, n: norms.get(v.gpsImei!.trim()) }))
@@ -62,12 +71,14 @@ export default async function FuelNormPage({
   const fleetL = solid.reduce((s, r) => s + r.n!.totalLitre, 0);
   const fleetNorm = fleetL > 0 ? fleetKm / fleetL : null;
   const divisionName = divisions.find((d) => d.code === divisionCode)?.nameLo ?? "ທຸກຝ່າຍ";
+  // cache ມີແຕ່ຊ່ວງທີ່ cron ດຶງມາແລ້ວ — ບອກໃຫ້ຮູ້ວ່າຄິດຈາກຂໍ້ມູນຍາວປານໃດແທ້
+  const short = coverage != null && coverage.from > from;
 
   return (
     <>
       {header}
 
-      <form method="get" className="mb-5 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
+      <form method="get" className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium">ຝ່າຍ</span>
           <select name="div" defaultValue={divisionCode} className={`${inputClass} min-w-52`}>
@@ -79,9 +90,9 @@ export default async function FuelNormPage({
         </label>
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium">ໃຊ້ຂໍ້ມູນຍ້ອນຫຼັງ</span>
-          <select name="months" defaultValue={String(monthCount)} className={inputClass}>
-            {[1, 2, 3, 6].map((m) => (
-              <option key={m} value={m}>{m} ເດືອນ</option>
+          <select name="days" defaultValue={String(dayCount)} className={inputClass}>
+            {[...new Set([...DAY_CHOICES, dayCount])].sort((a, b) => a - b).map((d) => (
+              <option key={d} value={d}>{d} ວັນ</option>
             ))}
           </select>
         </label>
@@ -92,9 +103,28 @@ export default async function FuelNormPage({
           ຄິດໃໝ່
         </button>
         <span className="ml-auto text-xs text-muted">
-          ດຶງ {vehicles.length} ຄັນ × {monthCount} ເດືອນ = {vehicles.length * monthCount} ຄຳຂໍ
+          {vehicles.length} ຄັນ · {from} → {to}
         </span>
       </form>
+
+      <p className="-mt-1 mb-4 text-xs text-muted">
+        ອ່ານຈາກ cache ໃນ DB (ໄວ) · ອັບເດດຫຼ້າສຸດ{" "}
+        {cacheAt ? cacheAt.toLocaleString("en-GB", { timeZone: "Asia/Vientiane", hour12: false }) : "—"}
+        {coverage && ` · cache ມີ ${coverage.from} → ${coverage.to} (${coverage.days} ວັນ)`}
+      </p>
+
+      {!coverage && (
+        <GpsNotice
+          title="cache ນ້ຳມັນຍັງຫວ່າງ"
+          detail="ແລ່ນ `npm run gps:sync-fuel -- --days=90 --skip-refuel` ຢູ່ server ກ່ອນ ແລ້ວຈຶ່ງເປີດໜ້ານີ້ຄືນ"
+        />
+      )}
+      {short && (
+        <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          cache ມີຂໍ້ມູນແຕ່ {coverage!.from} ເປັນຕົ້ນມາ — ຄິດຈາກ {coverage!.days} ວັນ ບໍ່ຄົບ {dayCount} ວັນທີ່ເລືອກ.
+          ຢາກໄດ້ຍາວກວ່ານີ້ ໃຫ້ backfill: `npm run gps:sync-fuel -- --days={dayCount} --skip-refuel`
+        </p>
+      )}
 
       <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="ລົດທີ່ຄິດໄດ້" value={`${solid.length}/${vehicles.length}`} hint={divisionName} />

@@ -10,6 +10,7 @@
     "test": "tsx --test src/**/*.test.ts",
     "gps:check": "tsx --conditions=react-server scripts/laogps-check.ts",
     "gps:sync-vehicles": "tsx --conditions=react-server scripts/laogps-sync-vehicles.ts",
+    "gps:sync-fuel": "tsx --conditions=react-server scripts/laogps-sync-fuel.ts",
     "gps:reset-vehicles": "tsx --conditions=react-server scripts/laogps-reset-vehicles.ts",
     "fleet:sync-transport": "tsx --conditions=react-server scripts/sync-transport-vehicles.ts",
     "hr:fix-status": "tsx --conditions=react-server scripts/fix-employment-status.ts",

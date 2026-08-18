@@ -129,11 +129,20 @@ export async function assignTripVehicle(tripId: string, _prev: FleetFormState, f
     prisma.carVehicle.findUnique({ where: { id: BigInt(vehicleId) } }),
   ]);
   if (!trip) return { error: "ບໍ່ພົບ trip" };
-  if (trip.approvedAt || trip.status === "CANCELLED") return { error: "Trip ນີ້ຖືກຈັດການແລ້ວ" };
-  // ຄຳຮ້ອງຈາກພະນັກງານ → ຕ້ອງອະນຸມັດຄົບທຸກຂັ້ນກ່ອນ ຈຶ່ງຈັດລົດໄດ້
-  if (trip.requestedByCode) {
-    const { done } = await currentStepInfo(trip);
-    if (!done) return { error: "ຍັງອະນຸມັດບໍ່ຄົບທຸກຂັ້ນ" };
+  // Sale trip: ແຜນຖືກອະນຸມັດຢູ່ລະບົບ SALE (ຜູ້ຈັດການຝ່າຍຂາຍ) — HRM ເຮັດສະເພາະ "ປ່ອຍລົດ"
+  // ຈຶ່ງບໍ່ອີງ chain ຂອງ HRM ແລະ ບໍ່ຕິດ approvedAt (ທີ່ SALE ຕັ້ງກ່ອນແລ້ວ)
+  const isSale = trip.tripType === "SALE";
+  if (trip.status === "CANCELLED") return { error: "Trip ນີ້ຖືກຍົກເລີກແລ້ວ" };
+  if (isSale) {
+    if (trip.workflowStatus !== "PLANNED") return { error: "Trip ອອກເດີນທາງແລ້ວ ປ່ຽນລົດບໍ່ໄດ້" };
+    if (trip.vehicleId && trip.vehicleApprovedAt) return { error: "ປ່ອຍລົດໃຫ້ Trip ນີ້ແລ້ວ" };
+  } else {
+    if (trip.approvedAt) return { error: "Trip ນີ້ຖືກຈັດການແລ້ວ" };
+    // ຄຳຮ້ອງຈາກພະນັກງານ → ຕ້ອງອະນຸມັດຄົບທຸກຂັ້ນກ່ອນ ຈຶ່ງຈັດລົດໄດ້
+    if (trip.requestedByCode) {
+      const { done } = await currentStepInfo(trip);
+      if (!done) return { error: "ຍັງອະນຸມັດບໍ່ຄົບທຸກຂັ້ນ" };
+    }
   }
   if (!vehicle || vehicle.status === "retired") return { error: "ບໍ່ພົບລົດ ຫຼືລົດຖືກປົດລະວາງ" };
   if (driverCode) {
@@ -167,20 +176,45 @@ export async function assignTripVehicle(tripId: string, _prev: FleetFormState, f
 
   await prisma.vehicleTrip.update({
     where: { id: tripId },
-    data: {
-      vehicleId,
-      driverCode,
-      tripNo,
-      status: "PLANNED",
-      workflowStatus: "PLANNED",
-      approvedAt: new Date(),
-      approvedByUserId: session.userId,
-      rejectReason: null,
-    },
+    data: isSale
+      ? {
+          // ປ່ອຍລົດ: ຕັ້ງ vehicle_approved_* — SALE ອ່ານຄ່ານີ້ເປັນ "ພ້ອມອອກເດີນທາງ"
+          // approvedAt ຂອງແຜນປ່ອຍໃຫ້ SALE ຄຸມ (ບໍ່ທັບ)
+          vehicleId,
+          driverCode,
+          tripNo,
+          vehicleApprovedAt: new Date(),
+          vehicleApprovedBy: session.employeeCode ?? session.userId,
+          vehicleRejectReason: null,
+        }
+      : {
+          vehicleId,
+          driverCode,
+          tripNo,
+          status: "PLANNED",
+          workflowStatus: "PLANNED",
+          approvedAt: new Date(),
+          approvedByUserId: session.userId,
+          rejectReason: null,
+        },
   });
-  await logTrip(session.userId, "APPROVE_AND_ASSIGN", tripId, { vehicleId, driverCode, tripNo });
+  await logTrip(session.userId, isSale ? "RELEASE_VEHICLE" : "APPROVE_AND_ASSIGN", tripId, { vehicleId, driverCode, tripNo });
   revalidatePath("/fleet/trips");
   return {};
+}
+
+/**
+ * Sale trip: HRM ບໍ່ປ່ອຍລົດ — ບໍ່ຍົກເລີກ trip (ແຜນຂາຍຍັງຢູ່) ພຽງແຕ່ໃສ່ເຫດຜົນ
+ * SALE ຈະສະແດງເຫດຜົນນີ້ໃຫ້ພະນັກງານ ແລະ ຂໍໃໝ່ / ໃຊ້ລົດຕົນເອງໄດ້
+ */
+export async function rejectSaleVehicle(id: string, formData: FormData) {
+  const session = await requireRole("ADMIN", "HR", "MANAGER");
+  const trip = await prisma.vehicleTrip.findUnique({ where: { id }, select: { tripType: true, status: true, vehicleApprovedAt: true } });
+  if (!trip || trip.tripType !== "SALE" || trip.status === "CANCELLED" || trip.vehicleApprovedAt) return;
+  const reason = String(formData.get("reason") ?? "").trim() || "HRM ບໍ່ສາມາດຈັດລົດໃຫ້ໄດ້";
+  await prisma.vehicleTrip.update({ where: { id }, data: { vehicleRejectReason: reason, vehicleId: null } });
+  await logTrip(session.userId, "REJECT_VEHICLE", id, { reason });
+  revalidatePath("/fleet/trips");
 }
 
 // ອະນຸມັດ 1 ຂັ້ນ (ຕາມ chain) — ຜູ້ອະນຸມັດຂອງຂັ້ນນັ້ນ ຫຼື ADMIN/HR

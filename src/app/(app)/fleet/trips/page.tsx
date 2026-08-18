@@ -7,7 +7,7 @@ import { tripScheduleLabel } from "@/lib/trip";
 import { TripCreateModal } from "../trip-create-modal";
 import { TripAssignForm } from "../trip-assign-form";
 import { TripEditActions } from "../trip-edit-actions";
-import { updateTripStatus, rejectTrip, approveTripStep } from "../actions";
+import { updateTripStatus, rejectTrip, approveTripStep, rejectSaleVehicle } from "../actions";
 import { currentStepInfo, canApproveStep, APPROVER_TYPE_LABEL } from "@/lib/trip-approvals";
 import Link from "next/link";
 
@@ -117,9 +117,39 @@ export default async function TripsPage({
   // ອ້າງອີງລົດຈາກ ERP: vehicleId (string) = app_car_vehicles.id
   const vehMap = new Map(vehicles.map((v) => [v.id.toString(), v]));
 
+  // Sale trip ທີ່ຂໍລົດບໍລິສັດ ແລະ ຍັງບໍ່ໄດ້ປ່ອຍລົດ — ແຜນອະນຸມັດຢູ່ລະບົບ SALE
+  // (ຜູ້ຈັດການຝ່າຍຂາຍ) HRM ເຮັດສະເພາະ "ປ່ອຍລົດ" ຈຶ່ງບໍ່ເອົາເຂົ້າ chain ຂອງ HRM
+  const saleVehiclePending = trips.filter(
+    (t) => t.tripType === "SALE" && t.isVehicleBorrower && !t.vehicleApprovedAt
+      && t.status !== "CANCELLED" && t.workflowStatus === "PLANNED",
+  );
+  const salePendingIds = new Set(saleVehiclePending.map((t) => t.id));
+  // ລົດທີ່ຝ່າຍຂາຍຂໍມາຕອນອອກໃບ (SALE ຂຽນໃສ່ hrm_sale_vehicle_request.requested_vehicle_id)
+  const requestedVehicle = new Map<string, { vehicleId: string; plate: string }>();
+  if (saleVehiclePending.length) {
+    const rows = await prisma.$queryRaw<{ trip_id: string; vehicle_id: string; plate: string }[]>`
+      select t.trip_id, r.requested_vehicle_id as vehicle_id,
+             coalesce(nullif(v.plate_no,''), v.name, r.requested_vehicle_id) as plate
+        from hrm_sale_vehicle_request r
+        cross join lateral unnest(r.trip_ids) as t(trip_id)
+        left join app_car_vehicles v on v.id::text = r.requested_vehicle_id
+       where r.requested_vehicle_id is not null and r.status in ('PENDING','APPROVED')
+         and t.trip_id = any(${saleVehiclePending.map((t) => t.id)}::text[])`;
+    for (const r of rows) requestedVehicle.set(r.trip_id, { vehicleId: r.vehicle_id, plate: r.plate });
+  }
+  // ຮ້ານທີ່ວາງແຜນໃນໃບ (Sales Call) — HRM ເຫັນວ່າໄປເຮັດຫຍັງ
+  const shopCount = new Map<string, number>();
+  if (saleVehiclePending.length) {
+    const rows = await prisma.$queryRaw<{ trip_id: string; n: number }[]>`
+      select trip_id, count(*)::int as n from app_route_plan
+       where trip_id = any(${saleVehiclePending.map((t) => t.id)}::text[]) group by trip_id`;
+    for (const r of rows) shopCount.set(r.trip_id, Number(r.n));
+  }
   // ຄຳຮ້ອງລໍຖ້າ (approvedAt == null, ຍັງບໍ່ຖືກປະຕິເສດ) vs trip ທີ່ອະນຸມັດແລ້ວ
-  const pending = trips.filter((t) => t.approvedAt === null && t.status !== "CANCELLED");
-  const scheduled = trips.filter((t) => t.approvedAt !== null);
+  // Sale trip ບໍ່ເຂົ້າ chain HRM — ຖ້າບໍ່ໄດ້ຂໍລົດ HRM ບໍ່ຕ້ອງເຫັນເລີຍ
+  const pending = trips.filter((t) => t.tripType !== "SALE" && t.approvedAt === null && t.status !== "CANCELLED");
+  // ຕາຕະລາງເດືອນ: ອະນຸມັດແລ້ວ ຫຼື Sale trip ທີ່ມີລົດແລ້ວ (ເຖິງແຜນຍັງລໍ SALE ອະນຸມັດ)
+  const scheduled = trips.filter((t) => !salePendingIds.has(t.id) && (t.approvedAt !== null || (t.tripType === "SALE" && !!t.vehicleId)));
   const salesDepartmentCodes = new Set(salesDepartments.map((department) => department.code));
   const salesVehicles = vehicles.filter(
     (vehicle) => vehicle.departmentCode && salesDepartmentCodes.has(vehicle.departmentCode),
@@ -274,6 +304,55 @@ export default async function TripsPage({
       </section>
 
       {/* ຄຳຮ້ອງຈາກພະນັກງານ (LINE) ທີ່ລໍຖ້າຈັດລົດ + ອະນຸມັດ */}
+      {saleVehiclePending.length > 0 && (
+        <Card className="mb-6 border-emerald-200 bg-emerald-50/40">
+          <h2 className="mb-1 font-semibold text-emerald-800">
+            ຝ່າຍຂາຍ ຂໍລົດ — ລໍປ່ອຍລົດ ({saleVehiclePending.length})
+          </h2>
+          <p className="mb-4 text-xs text-muted">ແຜນອະນຸມັດຢູ່ລະບົບ SALE ໂດຍຜູ້ຈັດການຝ່າຍຂາຍ · HRM ເລືອກລົດ + ຄົນຂັບ ແລ້ວປ່ອຍລົດ</p>
+          <div className="space-y-4">
+            {saleVehiclePending.map((t) => {
+              const planApproved = t.approvedAt !== null;
+              return (
+                <div key={t.id} className="rounded-xl border border-emerald-200 bg-white p-4">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium"><Link href={`/fleet/trips/${t.id}`} className="text-primary hover:underline">{t.destination}</Link> <Badge tone="green">Sale</Badge></p>
+                      <p className="text-xs text-muted">
+                        ຮ້ອງຂໍໂດຍ {t.requestedBy?.fullnameLo ?? t.requestedByCode ?? "-"}
+                        {` · ${tripScheduleLabel(t.date, t.endDate, t.departTime, t.returnTime, laoDate)}`}
+                        {` · ຄັ້ງທີ ${t.tripNo}`}
+                      </p>
+                      {t.members.length > 0 && (
+                        <p className="mt-1 text-xs text-muted">ຄົນໄປ: {t.members.map((m) => m.employee.fullnameLo).join(", ")}</p>
+                      )}
+                      {t.note && <p className="mt-1 text-xs text-muted">ໝາຍເຫດ: {t.note}</p>}
+                      {(shopCount.get(t.id) ?? 0) > 0 && <p className="mt-1 text-xs text-muted">ຮ້ານທີ່ວາງແຜນ: {shopCount.get(t.id)} ຮ້ານ (Sales Call)</p>}
+                      {requestedVehicle.get(t.id) && <p className="mt-1 text-xs font-medium text-amber-700">🚙 ຂໍລົດ: {requestedVehicle.get(t.id)!.plate}</p>}
+                      {t.vehicleRejectReason && <p className="mt-1 text-xs text-rose-600">ເຄີຍປະຕິເສດ: {t.vehicleRejectReason}</p>}
+                    </div>
+                    {canManage && (
+                      <form action={rejectSaleVehicle.bind(null, t.id)} className="flex gap-1">
+                        <input name="reason" required placeholder="ເຫດຜົນບໍ່ປ່ອຍລົດ" className="w-36 rounded border border-border px-2 py-1 text-xs" />
+                        <button className="text-xs text-muted hover:text-rose-600 hover:underline">ບໍ່ປ່ອຍລົດ</button>
+                      </form>
+                    )}
+                  </div>
+                  <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs">
+                    {planApproved
+                      ? <span className="font-medium text-emerald-700">✓ ຜູ້ຈັດການຝ່າຍຂາຍອະນຸມັດແຜນແລ້ວ — ພ້ອມປ່ອຍລົດ</span>
+                      : <span className="text-amber-700">⏳ ລໍຜູ້ຈັດການຝ່າຍຂາຍອະນຸມັດແຜນ (ໃນລະບົບ SALE) — ຈັດລົດລ່ວງໜ້າໄດ້ ແຕ່ຈະອອກເດີນທາງໄດ້ເມື່ອແຜນຜ່ານ</span>}
+                  </div>
+                  {canManage && (
+                    <TripAssignForm tripId={t.id} defaultTripNo={t.tripNo} vehicles={vehicleOptions} employees={empOptions} submitLabel="🚙 ປ່ອຍລົດ" defaultVehicleId={requestedVehicle.get(t.id)?.vehicleId ?? ""} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       {pending.length > 0 && (
         <Card className="mb-6 border-amber-200 bg-amber-50/40">
           <h2 className="mb-4 font-semibold text-amber-800">

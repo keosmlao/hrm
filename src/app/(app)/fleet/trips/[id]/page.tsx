@@ -5,8 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole, requireUser } from "@/lib/auth";
 import { Badge, Card, EmptyRow, PageHeader, StatCard, Table, Td, Th, inputClass } from "@/components/ui";
 import { kip, laoDate, laoDateTime } from "@/lib/format";
-import { EnableSaleTripForm, SaleCustomerForm, SaleExpenseForm, SaleOrderForm, SaleProductForm } from "../../sale-forms";
-import { SaleCustomerRow, SaleProductRow } from "../../sale-rows";
+import { EnableSaleTripForm, SaleExpenseForm, SaleOrderForm } from "../../sale-forms";
 import { TripEditActions } from "../../trip-edit-actions";
 import { advanceSaleTrip } from "../../sale-actions";
 import { isSaleStockBalanced } from "@/lib/sale-trip";
@@ -48,6 +47,25 @@ export default async function SaleTripPage({ params }: { params: Promise<{ id: s
     // ຈາກ cache ໃນ DB (cron gps:sync-fuel) — ບໍ່ເອີ້ນ Lao GPS ຕອນເປີດໜ້າ (ຊ້າ 30–200 ວິ)
     fuel = to > from ? await tripFuelFromCache(imei, from, to).catch(() => null) : null;
   }
+  // 🏪 ຮ້ານທີ່ວາງແຜນ/ເຂົ້າພົບ ຈາກ Sales Call (SALE): app_route_plan.trip_id + app_customer_visit.trip_id — ດຶງມາສະແດງແທນຕາຕະລາງ "ແຜນລູກຄ້າ" ແບບເກົ່າ
+  type ScShop = { id: string; d: string; tm: string | null; code: string; name: string; phone: string | null; address: string | null; employee: string; status: string; approved: boolean; visited_at: string | null; checked_out_at: string | null; result: string | null; order_amount: number | null };
+  const scShops = trip.tripType === "SALE"
+    ? await prisma.$queryRaw<ScShop[]>`
+        select p.id::text id, to_char(p.planned_date,'DD/MM') d, to_char(p.scheduled_time,'HH24:MI') tm,
+               p.customer_code code, coalesce(nullif(trim(c.name_1),''), p.customer_code) "name",
+               nullif(trim(c.telephone),'') phone,
+               nullif(trim(c.address),'') address,
+               coalesce(nullif(trim(e.fullname_lo),''), p.employee_code) employee,
+               p.status, (p.approved_at is not null) approved,
+               to_char(v.visited_at,'DD/MM HH24:MI') visited_at, to_char(v.checked_out_at,'HH24:MI') checked_out_at,
+               v.result, v.order_amount::float order_amount
+          from public.app_route_plan p
+          left join public.ar_customer c on c.code = p.customer_code
+          left join public.odg_employee e on e.employee_code = p.employee_code
+          left join public.app_customer_visit v on v.id = p.visit_id
+         where p.trip_id = ${trip.id}
+         order by p.planned_date, p.scheduled_time nulls last, p.id`.catch(() => [] as ScShop[])
+    : [];
   // ບິນນ້ຳມັນ — HRM ບັນທຶກ type "FUEL", ແອັບ/ເວັບ SALE ບັນທຶກ "ນ້ຳມັນ"
   const fuelBills = trip.saleExpenses.filter((e) => e.type === "FUEL" || e.type === "ນ້ຳມັນ");
   const stockBalanced = trip.saleProducts.length > 0 && trip.saleProducts.every((p) => isSaleStockBalanced({ loadedQty: Number(p.loadedQty), soldQty: Number(p.soldQty), sampleQty: Number(p.sampleQty), returnedQty: Number(p.returnedQty), damagedQty: Number(p.damagedQty) }));
@@ -69,13 +87,36 @@ export default async function SaleTripPage({ params }: { params: Promise<{ id: s
 
       {fuel && <TripFuelCard fuel={fuel} plate={vehicle?.plateNo ?? imei ?? ""} fuelBills={fuelBills.length} billTotal={fuelBills.reduce((s, e) => s + Number(e.amount), 0)} />}
 
-      <Card><h2 className="mb-4 font-semibold">ແຜນລູກຄ້າ ({trip.saleCustomers.length})</h2>{canEdit && trip.workflowStatus !== "CLOSED" && <div className="mb-5"><SaleCustomerForm tripId={trip.id} sequence={trip.saleCustomers.length + 1} /></div>}<Table><thead><tr><Th>#</Th><Th>ລູກຄ້າ</Th><Th>ເບີໂທ</Th><Th>ທີ່ຢູ່</Th><Th>Check-in</Th><Th>ສະຖານະ</Th><Th></Th></tr></thead><tbody>{trip.saleCustomers.length === 0 && <EmptyRow colSpan={7} text="ຍັງບໍ່ມີລູກຄ້າ" />}{trip.saleCustomers.map((c) => <SaleCustomerRow key={c.id} tripId={trip.id} canEdit={canEdit && trip.workflowStatus !== "CLOSED"} customer={{ id: c.id, sequence: c.sequence, customerCode: c.customerCode, customerName: c.customerName, phone: c.phone, address: c.address, latitude: c.latitude, longitude: c.longitude, note: c.note, status: c.status, checkedInAt: c.checkedInAt ? c.checkedInAt.toISOString() : null }} />)}</tbody></Table></Card>
-
-      <Card><h2 className="mb-4 font-semibold">ສິນຄ້າໃນ Trip ({trip.saleProducts.length})</h2>{canEdit && trip.workflowStatus === "PLANNED" && <div className="mb-5"><SaleProductForm tripId={trip.id} /></div>}<Table><thead><tr><Th>ສິນຄ້າ</Th><Th className="text-right">ຂຶ້ນລົດ</Th><Th className="text-right">ຂາຍ</Th><Th className="text-right">ແຈກ</Th><Th className="text-right">ຄືນ</Th><Th className="text-right">ເສຍ</Th><Th>ກວດຍອດ</Th></tr></thead><tbody>{trip.saleProducts.length === 0 && <EmptyRow colSpan={7} text="ຍັງບໍ່ມີສິນຄ້າ" />}{trip.saleProducts.map((p) => <SaleProductRow key={p.id} tripId={trip.id} canEdit={canEdit} workflowStatus={trip.workflowStatus} product={{ id: p.id, productCode: p.productCode, productName: p.productName, unit: p.unit, unitPrice: Number(p.unitPrice), loadedQty: Number(p.loadedQty), soldQty: Number(p.soldQty), sampleQty: Number(p.sampleQty), returnedQty: Number(p.returnedQty), damagedQty: Number(p.damagedQty) }} />)}</tbody></Table></Card>
+      <Card>
+        <h2 className="mb-1 font-semibold">🏪 ຮ້ານທີ່ວາງແຜນ / ເຂົ້າພົບ ({scShops.length}) <Badge tone="blue">Sales Call</Badge></h2>
+        <p className="mb-4 text-xs text-muted">ດຶງຈາກແຜນ Sales Call ຂອງຜູ້ຂໍ ແລະ ຜູ້ຮ່ວມເດີນທາງ (ແອັບ/ເວັບ SALE) — check-in ຮ້ານ, ຜົນ, Order ອັບເດດເອງ · ພົບແລ້ວ {scShops.filter((x) => x.visited_at).length} · Order ລວມ {Math.round(scShops.reduce((s0, x) => s0 + (x.order_amount ?? 0), 0)).toLocaleString()} ບາດ</p>
+        <Table>
+          <thead><tr><Th>ວັນ/ເວລາ</Th><Th>ລູກຄ້າ</Th><Th>ເບີໂທ</Th><Th>ທີ່ຢູ່</Th><Th>ພະນັກງານ</Th><Th>Check-in</Th><Th>ຜົນ</Th><Th className="text-right">Order (ບາດ)</Th></tr></thead>
+          <tbody>
+            {scShops.length === 0 && <EmptyRow colSpan={8} text="ຍັງບໍ່ມີແຜນ Sales Call ຜູກກັບ trip ນີ້" />}
+            {scShops.map((x) => (
+              <tr key={x.id}>
+                <Td className="whitespace-nowrap">{x.d}{x.tm ? ` ${x.tm}` : ""}</Td>
+                <Td className="font-medium">{x.name}<span className="block text-xs font-normal text-muted">{x.code}</span></Td>
+                <Td>{x.phone ?? "-"}</Td>
+                <Td className="max-w-[260px] truncate" title={x.address ?? ""}>{x.address ?? "-"}</Td>
+                <Td>{x.employee}</Td>
+                <Td>{x.visited_at ? <span className="text-emerald-700">✓ {x.visited_at}{x.checked_out_at ? `–${x.checked_out_at}` : ""}</span> : x.status === "skipped" ? <Badge tone="gray">ຂ້າມ</Badge> : x.approved ? <Badge tone="amber">ລໍເຂົ້າພົບ</Badge> : <Badge tone="gray">ລໍອະນຸມັດ</Badge>}</Td>
+                <Td>{x.result ?? "-"}</Td>
+                <Td className="text-right tabular">{x.order_amount ? Math.round(x.order_amount).toLocaleString() : "-"}</Td>
+              </tr>
+            ))}
+            </tbody>
+          </Table>
+      </Card>
 
       <Card><h2 className="mb-4 font-semibold">ການຂາຍ ({trip.saleOrders.length})</h2>{canEdit && ["DEPARTED", "IN_PROGRESS"].includes(trip.workflowStatus) && trip.saleProducts.length > 0 && <div className="mb-5"><SaleOrderForm tripId={trip.id} customers={trip.saleCustomers.map((c) => ({ id: c.id, label: c.customerName }))} products={trip.saleProducts.map((p) => ({ id: p.id, label: `${p.productCode} · ${p.productName}`, unitPrice: Number(p.unitPrice) }))} /></div>}<Table><thead><tr><Th>ເລກທີ</Th><Th>ລູກຄ້າ</Th><Th>ລາຍການ</Th><Th className="text-right">ລວມ</Th><Th className="text-right">ຈ່າຍ</Th><Th>ເວລາ</Th></tr></thead><tbody>{trip.saleOrders.length === 0 && <EmptyRow colSpan={6} text="ຍັງບໍ່ມີການຂາຍ" />}{trip.saleOrders.map((o) => <tr key={o.id}><Td>{o.orderNo}</Td><Td>{o.customerName}</Td><Td className="text-xs">{o.items.map((i) => `${i.productName} × ${Number(i.quantity)}`).join(", ")}</Td><Td className="text-right">{kip(Number(o.total))}</Td><Td className="text-right">{kip(Number(o.paidAmount))}</Td><Td>{laoDateTime(o.soldAt)}</Td></tr>)}</tbody></Table></Card>
 
-      <Card><h2 className="mb-4 font-semibold">ຄ່າໃຊ້ຈ່າຍ ({trip.saleExpenses.length})</h2>{canEdit && trip.workflowStatus !== "CLOSED" && <div className="mb-5"><SaleExpenseForm tripId={trip.id} /></div>}<Table><thead><tr><Th>ປະເພດ</Th><Th>ໝາຍເຫດ</Th><Th className="text-right">ຈຳນວນ</Th><Th>ເວລາ</Th></tr></thead><tbody>{trip.saleExpenses.length === 0 && <EmptyRow colSpan={4} text="ຍັງບໍ່ມີຄ່າໃຊ້ຈ່າຍ" />}{trip.saleExpenses.map((e) => <tr key={e.id}><Td>{e.type}</Td><Td>{e.note ?? "-"}</Td><Td className="text-right">{kip(Number(e.amount))}</Td><Td>{laoDateTime(e.incurredAt)}</Td></tr>)}</tbody></Table></Card>
+      <Card><h2 className="mb-4 font-semibold">ຄ່າໃຊ້ຈ່າຍ ({trip.saleExpenses.length})</h2>{canEdit && trip.workflowStatus !== "CLOSED" && <div className="mb-5"><SaleExpenseForm tripId={trip.id} /></div>}<Table><thead><tr><Th>ປະເພດ</Th><Th>ໝາຍເຫດ</Th><Th className="text-right">ຈຳນວນ</Th><Th>ເວລາ</Th><Th>ບິນ / ຮູບ</Th></tr></thead><tbody>{trip.saleExpenses.length === 0 && <EmptyRow colSpan={5} text="ຍັງບໍ່ມີຄ່າໃຊ້ຈ່າຍ" />}{trip.saleExpenses.map((e) => {
+        // ຮູບຈາກແອັບ SALE: token "file:…" (ຄັ່ນ ',' ຖ້າຫຼາຍຮູບ) → ຜ່ານ /api/photo-proxy; URL ທຳມະດາ → ລິງຕົງ
+        const photos = (e.receiptUrl ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+        return <tr key={e.id}><Td>{e.type === "ນ້ຳມັນ" || e.type === "FUEL" ? "⛽ " : ""}{e.type}</Td><Td>{e.note ?? "-"}</Td><Td className="text-right">{kip(Number(e.amount))}</Td><Td>{laoDateTime(e.incurredAt)}</Td><Td className="text-xs">{photos.length === 0 ? <span className="text-muted">-</span> : photos.map((p, i) => <a key={p} href={p.startsWith("file:") ? `/api/photo-proxy?f=${encodeURIComponent(p)}` : p} target="_blank" rel="noreferrer" className="mr-2 text-primary hover:underline">🧾 ຮູບ {i + 1}</a>)}</Td></tr>;
+      })}</tbody></Table></Card>
     </>}
   </>;
 }

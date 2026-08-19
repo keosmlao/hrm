@@ -6,6 +6,19 @@ import { vehicleLabel } from "@/lib/fleet-gps";
  * ແຖບເລືອກຊ່ວງວັນທີ (+ ລົດ) ຂອງລາຍງານ GPS — form GET ທຳມະດາ,
  * ຄ່າຢູ່ໃນ URL ຈຶ່ງ bookmark/share ໄດ້.
  */
+/** ຈັດລົດເປັນກຸ່ມຕາມພະແນກ — ພະແນກທີ່ມີລົດຫຼາຍກ່ອນ, ອັນທີ່ບໍ່ລະບຸໄວ້ທ້າຍ */
+function groupByDepartment(vehicles: GpsVehicleOption[]): [string, GpsVehicleOption[]][] {
+  const NONE = "ບໍ່ໄດ້ລະບຸພະແນກ";
+  const groups = new Map<string, GpsVehicleOption[]>();
+  for (const v of vehicles) {
+    const key = v.department?.trim() || NONE;
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(v);
+  }
+  return [...groups.entries()].sort((a, b) =>
+    a[0] === NONE ? 1 : b[0] === NONE ? -1 : b[1].length - a[1].length || a[0].localeCompare(b[0]),
+  );
+}
+
 export function GpsFilter({
   action,
   from,
@@ -30,12 +43,17 @@ export function GpsFilter({
         {vehicles && (
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium">ລົດ</span>
-            <select name="imei" defaultValue={selectedImei} className={`${inputClass} min-w-56`}>
-              {vehicles.map((v) => (
-                <option key={v.imei} value={v.imei}>
-                  {vehicleLabel(v)}
-                  {v.plateNo && v.name ? ` · ${v.name}` : ""}
-                </option>
+            {/* ຈັດກຸ່ມຕາມພະແນກ — ລົດ 28 ຄັນ ຫາຄັນທີ່ຕ້ອງການໄວກວ່າ */}
+            <select name="imei" defaultValue={selectedImei} className={`${inputClass} min-w-64`}>
+              {groupByDepartment(vehicles).map(([department, list]) => (
+                <optgroup key={department} label={`${department} (${list.length})`}>
+                  {list.map((v) => (
+                    <option key={v.imei} value={v.imei}>
+                      {vehicleLabel(v)}
+                      {v.plateNo && v.name ? ` · ${v.name}` : ""}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>

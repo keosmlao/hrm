@@ -100,6 +100,8 @@ export default function LiveView({ initial }: { initial: VehiclePosition[] }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<Kind | null>(null);
   const [search, setSearch] = useState("");
+  /** null = ທຸກພະແນກ · "__none" = ລົດທີ່ຍັງບໍ່ໄດ້ລະບຸພະແນກ */
+  const [dept, setDept] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string>("");
   const [pending, setPending] = useState(false);
   const [motionNow, setMotionNow] = useState(0);
@@ -163,15 +165,32 @@ export default function LiveView({ initial }: { initial: VehiclePosition[] }) {
     return s;
   }, [kinds]);
 
+  const NO_DEPT = "__none";
+  const deptLabel = useCallback((p: VehiclePosition) => p.department?.trim() || NO_DEPT, []);
+  /** ພະແນກທັງໝົດ (ຮຽງຕາມຈຳນວນລົດ) — ໃຊ້ເປັນຕົວເລືອກ ແລະ ຫົວກຸ່ມ */
+  const depts = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const p of positions) count.set(deptLabel(p), (count.get(deptLabel(p)) ?? 0) + 1);
+    return [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [positions, deptLabel]);
+
+  const deptOrder = useMemo(() => depts.map(([label]) => label), [depts]);
+
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
     return positions
       .filter((p) => (filter ? kinds.get(p.id) === filter : true))
+      .filter((p) => (dept ? deptLabel(p) === dept : true))
       .filter((p) =>
-        q ? `${p.plateNo ?? ""} ${p.name ?? ""} ${p.driverName ?? ""}`.toLowerCase().includes(q) : true,
+        q ? `${p.plateNo ?? ""} ${p.name ?? ""} ${p.driverName ?? ""} ${p.department ?? ""}`.toLowerCase().includes(q) : true,
       )
-      .sort((a, b) => ORDER.indexOf(kinds.get(a.id)!) - ORDER.indexOf(kinds.get(b.id)!));
-  }, [positions, filter, search, kinds]);
+      .sort(
+        (a, b) =>
+          // ບໍ່ໄດ້ເລືອກພະແນກ → ຈັດເປັນກຸ່ມຕາມພະແນກ (ພະແນກລົດຫຼາຍກ່ອນ) ແລ້ວຈຶ່ງຮຽງຕາມສະຖານະ
+          (dept ? 0 : deptOrder.indexOf(deptLabel(a)) - deptOrder.indexOf(deptLabel(b))) ||
+          ORDER.indexOf(kinds.get(a.id)!) - ORDER.indexOf(kinds.get(b.id)!),
+      );
+  }, [positions, filter, dept, search, kinds, deptLabel, deptOrder]);
 
   // ຄຳນວນຈາກເວລາບັນທຶກຂອງອຸປະກອນ (ບໍ່ແມ່ນເວລາຮັບ response)
   // ຈຶ່ງຊົດເຊີຍ latency ໄດ້: ໄລຍະທາງ = ຄວາມໄວ × ເວລາ.
@@ -263,6 +282,19 @@ export default function LiveView({ initial }: { initial: VehiclePosition[] }) {
         ))}
 
         <div className="ml-auto flex items-center gap-2">
+          <select
+            value={dept ?? ""}
+            onChange={(e) => setDept(e.target.value || null)}
+            className="max-w-48 rounded-lg border border-border bg-card px-3 py-1.5 text-sm outline-none focus:border-primary"
+            title="ກັ່ນຕອງຕາມພະແນກເຈົ້າຂອງລົດ"
+          >
+            <option value="">ທຸກພະແນກ ({positions.length})</option>
+            {depts.map(([label, count]) => (
+              <option key={label} value={label}>
+                {label === NO_DEPT ? "ບໍ່ໄດ້ລະບຸພະແນກ" : label} ({count})
+              </option>
+            ))}
+          </select>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -288,11 +320,22 @@ export default function LiveView({ initial }: { initial: VehiclePosition[] }) {
               ບໍ່ພົບລົດຕາມເງື່ອນໄຂ
             </p>
           )}
-          {list.map((p) => {
+          {list.map((p, i) => {
             const k = kinds.get(p.id)!;
             const active = p.id === selected;
             const addr = cleanAddress(p.address);
+            // ຫົວກຸ່ມ: ສະແດງເມື່ອບໍ່ໄດ້ເລືອກພະແນກ ແລະ ພະແນກປ່ຽນຈາກແຖວກ່ອນ
+            const group = !dept && (i === 0 || deptLabel(list[i - 1]) !== deptLabel(p)) ? deptLabel(p) : null;
             return (
+              <div key={`g-${p.id}`}>
+              {group && (
+                <p className="mt-2 mb-1 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 first:mt-0">
+                  {group === NO_DEPT ? "ບໍ່ໄດ້ລະບຸພະແນກ" : group}
+                  <span className="font-normal text-slate-400">
+                    {list.filter((x) => deptLabel(x) === group).length} ຄັນ
+                  </span>
+                </p>
+              )}
               <button
                 key={p.id}
                 onClick={() => setSelected(active ? null : p.id)}
@@ -319,6 +362,7 @@ export default function LiveView({ initial }: { initial: VehiclePosition[] }) {
                   {k === "moving" ? `${Math.round(p.speed ?? 0)}` : KIND[k].label}
                 </span>
               </button>
+              </div>
             );
           })}
         </div>

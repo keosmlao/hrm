@@ -33,6 +33,8 @@ export type MenuGroup = { title: string; items: MenuItem[] };
 const ALL: Role[] = ROLES;
 const MANAGE: Role[] = ["ADMIN", "HR"];
 const FLEET: Role[] = ["ADMIN", "HR", "MANAGER", "EXECUTIVE"];
+/** ຜູ້ຕັດສິນເລື່ອງລົດ — ກວດ/ຢືນຢັນເຫດການ (ບໍ່ລວມ EXECUTIVE ທີ່ເບິ່ງເທົ່ານັ້ນ)  */
+const FLEET_REVIEW: Role[] = ["ADMIN", "HR", "MANAGER"];
 
 export const MENU: MenuGroup[] = [
   {
@@ -61,9 +63,13 @@ export const MENU: MenuGroup[] = [
       { key: "fleet.tracking", href: "/fleet/tracking", label: "ຕິດຕາມຕຳແໜ່ງລົດ", icon: "fleet", defaultRoles: FLEET },
       { key: "fleet.history", href: "/fleet/history", label: "ປະຫວັດເສັ້ນທາງ", icon: "fleet", defaultRoles: FLEET },
       { key: "fleet.fuel", href: "/fleet/fuel", label: "ລາຍງານນ້ຳມັນ", icon: "fleet", defaultRoles: FLEET },
-      { key: "fleet.fuelNorm", href: "/fleet/fuel-norm", label: "ມາດຕະຖານກິນນ້ຳມັນ", icon: "fleet", defaultRoles: FLEET },
+      // ລວມເຂົ້າ "ລາຍງານນ້ຳມັນ" ແລ້ວ — ຄົງ route ໄວ້ໃຫ້ລິງເກົ່າໃຊ້ໄດ້
+      { key: "fleet.fuelNorm", href: "/fleet/fuel-norm", label: "ມາດຕະຖານກິນນ້ຳມັນ", icon: "fleet", defaultRoles: FLEET, hiddenFromSidebar: true },
+      { key: "fleet.fuelCost", href: "/fleet/fuel/cost", label: "ຕົ້ນທຶນນ້ຳມັນ / ກວດບິນ", icon: "fleet", defaultRoles: FLEET },
+      { key: "fleet.fuelReview", href: "/fleet/fuel/review", label: "ກວດເຫດການນ້ຳມັນ", icon: "fleet", defaultRoles: FLEET_REVIEW },
       { key: "fleet.gpsSummary", href: "/fleet/gps-summary", label: "ສະຫຼຸບ GPS ປະຈຳເດືອນ", icon: "fleet", defaultRoles: FLEET },
-      { key: "fleet.driverScore", href: "/fleet/driver-score", label: "ຄະແນນການຂັບຂີ່", icon: "fleet", defaultRoles: FLEET },
+      // ລວມເຂົ້າ "ສະຫຼຸບ GPS ປະຈຳເດືອນ" ແລ້ວ (ຮຽງຕາມຄະແນນໄດ້ດ້ວຍ ?sort=safety)
+      { key: "fleet.driverScore", href: "/fleet/driver-score", label: "ຄະແນນການຂັບຂີ່", icon: "fleet", defaultRoles: FLEET, hiddenFromSidebar: true },
       { key: "fleet.dailySlip", href: "/fleet/daily-slip", label: "ລາຍການໃບນຳໃຊ້ລົດ", icon: "trips", defaultRoles: FLEET, hiddenFromSidebar: true },
       { key: "fleet.monthlyPlan", href: "/fleet/monthly-plan", label: "ແຜນນຳໃຊ້ລົດ ລາຍເດືອນ", icon: "trips", defaultRoles: FLEET, hiddenFromSidebar: true },
       { key: "fleet.vehicles", href: "/fleet/vehicles", label: "ຈັດການລົດ", icon: "fleet", defaultRoles: MANAGE },

@@ -168,6 +168,33 @@ export async function refuelEventsBetween(from: Date, to: Date, imeis?: string[]
   }));
 }
 
+/** ຂະໜາດຖັງ (ລິດ) ຕໍ່ imei — ໃຊ້ແປງ % ເປັນລິດ ໃຫ້ຄົນອ່ານເຂົ້າໃຈງ່າຍ */
+export async function vehicleTankLitres(): Promise<Map<string, number>> {
+  // ⚠ ຢ່າໃຊ້ `day` ເປັນ alias — Postgres ຖືເປັນ keyword (ເຄີຍພັງ: syntax error at or near "day")
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+    select imei, tank_litre from (
+      select imei, tank_litre, 1 as pri
+        from hrm_vehicle_gps
+       where tank_litre > 0
+      union all
+      select imei, tank_litre, 2 as pri
+        from (
+          select distinct on (imei) imei, tank_litre
+            from hrm_vehicle_fuel_daily
+           where tank_litre > 0
+           order by imei, day desc
+        ) latest
+    ) t
+    order by pri`;
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    const imei = String(r.imei).trim();
+    const tank = Number(r.tank_litre);
+    if (imei && Number.isFinite(tank) && tank > 0 && !out.has(imei)) out.set(imei, tank);
+  }
+  return out;
+}
+
 export type FuelSyncState = { imei: string; refuelSyncedTo: Date | null; note: string | null; lastError: string | null; updatedAt: Date };
 
 export async function fuelSyncStates(): Promise<Map<string, FuelSyncState>> {
@@ -240,14 +267,22 @@ const CHUNK_MS = 24 * 3600_000;
 const OVERLAP_MS = 60 * 60_000;
 
 /**
- * ຫາເຫດການເຕີມ ຂອງລົດ sensor ທຸກຄັນ ຕັ້ງແຕ່ watermark (ຫຼື `backfillDays` ວັນ) ຮອດຕອນນີ້
+ * ຫາເຫດການເຕີມ ຂອງລົດທຸກຄັນ ຕັ້ງແຕ່ watermark (ຫຼື `backfillDays` ວັນ ຖ້າຍັງບໍ່ເຄີຍ sync) ຮອດຕອນນີ້
  * ຂໍ history ເປັນທ່ອນ ≤ 24 ຊມ (ທ່ອນສັ້ນ ຄິດໄວກວ່າ) · ທັບຊ້ອນ 1 ຊມ ກັນ median window ຂາດ
  * ຄວາມພ້ອມກັນ `concurrency` ຄັນ — provider ຊ້າ ຢ່າຖົມ
+ *
+ * `rescanDays` = ບັງຄັບສະແກນຄືນ N ວັນຫຼ້າສຸດ ເຖິງແມ່ນ watermark ຈະໃໝ່ກວ່ານັ້ນ (ສູງສຸດ 31 ວັນ —
+ * ໃຊ້ຕອນ backfill ຫຼື ຫຼັງແກ້ logic ການຈັບ; ຮອບ cron ປົກກະຕິຢ່າໃສ່ ຈະໜັກໂດຍບໍ່ຈຳເປັນ)
  */
-export async function syncRefuels(opts: { backfillDays?: number; concurrency?: number; log?: (s: string) => void } = {}): Promise<{ vehicles: number; events: number }> {
+export async function syncRefuels(opts: { backfillDays?: number; rescanDays?: number; concurrency?: number; log?: (s: string) => void } = {}): Promise<{ vehicles: number; events: number }> {
   const log = opts.log ?? (() => {});
   const backfill = (opts.backfillDays ?? 7) * 86_400_000;
-  const vehicles = (await listVehicles({ limit: 500 })).filter((v) => v.imei && v.active && v.fuel_capability?.supported && v.fuel_capability.method === "sensor");
+  const rescan = opts.rescanDays ? opts.rescanDays * 86_400_000 : 0;
+  // ⚠ ຢ່າກັ່ນດ້ວຍ `fuel_capability.method === "sensor"` — Lao GPS ຕິດປ້າຍ "rate" ໃຫ້ 7 ຄັນ
+  // ທັງທີ່ຈຸດ GPS ຂອງເຂົາມີ fuel_percent ຄົບທຸກຈຸດ (ກວດແລ້ວ 2026-08-18). ປ້າຍນັ້ນເປັນວິທີທີ່
+  // ເຂົາເລືອກຄິດ "ລິດທີ່ໃຊ້" ເທົ່ານັ້ນ ບໍ່ໄດ້ແປວ່າບໍ່ມີເຊັນເຊີ — detectRefuels ອ່ານ % ເອງ.
+  // ເຊັນເຊີຄ້າງ/ບໍ່ຂະຫຍັບ ຍັງຖືກຈັບດ້ວຍການກວດ pctMin/pctMax ຂ້າງລຸ່ມຢູ່ແລ້ວ.
+  const vehicles = (await listVehicles({ limit: 500 })).filter((v) => v.imei && v.active && v.fuel_capability?.supported && v.fuel_capability.tank_litre);
   const states = await fuelSyncStates();
   const now = Date.now();
   let events = 0;
@@ -256,7 +291,8 @@ export async function syncRefuels(opts: { backfillDays?: number; concurrency?: n
     for (let v = queue.shift(); v; v = queue.shift()) {
       const imei = v.imei.trim();
       const st = states.get(imei);
-      const start = Math.max(st?.refuelSyncedTo ? st.refuelSyncedTo.getTime() - OVERLAP_MS : now - backfill, now - 31 * 86_400_000);
+      const watermarkStart = st?.refuelSyncedTo ? st.refuelSyncedTo.getTime() - OVERLAP_MS : now - backfill;
+      const start = Math.max(rescan ? Math.min(watermarkStart, now - rescan) : watermarkStart, now - 31 * 86_400_000);
       let cursor = start;
       let vehicleEvents = 0;
       let note: string | null = null;
@@ -415,7 +451,8 @@ export async function suggestStationsFromEvents(by: string, minEvents = 3): Prom
 /**
  * ໃຫ້ຄະແນນເຫດການ 30 ວັນ (ຄິດຄືນທຸກຮອບ — ບິນອາດມາທີຫຼັງ, ຈຸດເຕີມອາດເພີ່ມ):
  *   station  ຢູ່ໃນ geofence ຈຸດເຕີມທີ່ active
- *   receipt  ມີບິນນ້ຳມັນ (hrm_sale_trip_expense type ນ້ຳມັນ/FUEL) ຂອງ trip ທີ່ໃຊ້ລົດຄັນນີ້ ພາຍໃນ ±45 ນາທີ
+ *   receipt  ມີບິນນ້ຳມັນ — SALE: hrm_sale_trip_expense ຂອງ trip ທີ່ໃຊ້ລົດຄັນນີ້ ±45 ນາທີ ·
+ *            TMS: odg_tms_fuel_log ຈັບຄູ່ດ້ວຍເລກທະບຽນ ±1 ວັນ (ຕາຕະລາງນັ້ນມີແຕ່ວັນທີ)
  *   litreOk  ລິດ ≤ ບ່ອນວ່າງໃນຖັງ + 5   rateOk ≤ 60 L/ນາທີ   sizeOk ≥ 8 L
  * confidence: ຄົນຂັບ/ຜູ້ຈັດການ ບໍ່ແມ່ນ → REJECTED · ຢືນຢັນ ຫຼື ມີບິນ → CONFIRMED · (ຢູ່ຈຸດເຕີມ ຫຼື ≥ 10 L) + ຜ່ານກວດ → LIKELY · ອື່ນໆ (ນ້ອຍ + ນອກຈຸດເຕີມ) → CHECK
  * DROP ໃຫ້ CHECK ສະເໝີ (ຕ້ອງໃຫ້ຄົນເບິ່ງ)
@@ -431,7 +468,20 @@ export async function scoreRefuelEvents(days = 30): Promise<number> {
               join public.app_car_vehicles v on v.id::text = t.vehicle_id and trim(v.gps_imei) = e.imei
              where x.type in ('ນ້ຳມັນ','FUEL')
                and (x.incurred_at at time zone 'Asia/Bangkok') between e.event_time - interval '45 minutes' and e.event_time + interval '45 minutes'
-             order by abs(extract(epoch from (x.incurred_at at time zone 'Asia/Bangkok') - e.event_time)) limit 1) receipt_id
+             order by abs(extract(epoch from (x.incurred_at at time zone 'Asia/Bangkok') - e.event_time)) limit 1) receipt_id,
+           -- ບິນຝັ່ງຂົນສົ່ງ (TMS) ມີແຕ່ວັນທີ ບໍ່ມີເວລາ → ຍອມ ±1 ວັນ ແລະ ຈັບຄູ່ດ້ວຍເລກທະບຽນ
+           (select 'tms:' || f.id
+              from odg_tms_fuel_log f
+              join public.app_car_vehicles v on trim(v.gps_imei) = e.imei
+             where (regexp_replace(lower(coalesce(f.car,'')), '[[:space:]._-]+', '', 'g')
+                      = regexp_replace(lower(coalesce(v.plate_no,'')), '[[:space:]._-]+', '', 'g')
+                    or (length(regexp_replace(coalesce(f.car,''), '[^0-9]', '', 'g')) >= 4
+                        and regexp_replace(coalesce(f.car,''), '[^0-9]', '', 'g')
+                              = regexp_replace(coalesce(v.plate_no,''), '[^0-9]', '', 'g')))
+               and f.fuel_date between (e.event_time at time zone 'Asia/Vientiane')::date - 1
+                                   and (e.event_time at time zone 'Asia/Vientiane')::date + 1
+             order by abs(f.fuel_date - (e.event_time at time zone 'Asia/Vientiane')::date), f.id
+             limit 1) tms_receipt_id
       from hrm_vehicle_refuel_event e
      where e.event_time > now() - (${days}::int * interval '1 day')`;
   let updated = 0;
@@ -445,7 +495,7 @@ export async function scoreRefuelEvents(days = 30): Promise<number> {
     const mins = Math.max(1, n(r.stop_minutes));
     const checks: RefuelChecks = {
       station: !!st,
-      receipt: r.receipt_id != null,
+      receipt: r.receipt_id != null || r.tms_receipt_id != null,
       litreOk: tank == null || litre <= (tank * (100 - before)) / 100 + 5,
       rateOk: litre / mins <= 60,
       sizeOk: litre >= 8,
@@ -460,7 +510,8 @@ export async function scoreRefuelEvents(days = 30): Promise<number> {
     else confidence = "CHECK";
     await prisma.$executeRaw`
       update hrm_vehicle_refuel_event
-         set station_id = ${st ? BigInt(st.id) : null}, receipt_expense_id = ${(r.receipt_id as string | null) ?? null},
+         set station_id = ${st ? BigInt(st.id) : null},
+             receipt_expense_id = ${(r.receipt_id as string | null) ?? (r.tms_receipt_id as string | null) ?? null},
              checks = ${JSON.stringify(checks)}::jsonb, confidence = ${confidence}
        where id = ${BigInt(String(r.id))}`;
     updated++;

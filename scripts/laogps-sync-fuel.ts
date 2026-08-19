@@ -5,6 +5,7 @@
  *   npm run gps:sync-fuel                    # ມື້ນີ້ + ມື້ວານ (/fuel) ແລະ ເຕີມ ຕໍ່ຈາກ watermark (ຄັ້ງທຳອິດ 7 ວັນ)
  *   npm run gps:sync-fuel -- --days=31       # backfill 31 ວັນ (ຄັ້ງທຳອິດ) — ~1.5 ວິ/ວັນ ສຳລັບ /fuel
  *   npm run gps:sync-fuel -- --refuel-days=14 --concurrency=2
+ *   npm run gps:sync-fuel -- --rescan-days=31   # ບັງຄັບສະແກນເຫດການເຕີມຄືນ 31 ວັນ (ບໍ່ສົນ watermark)
  *   npm run gps:sync-fuel -- --skip-refuel   # ສະເພາະຕົວເລກລາຍວັນ
  * ທຸກຮອບຈະ: ສະເໜີຈຸດເຕີມຈາກ cluster ເຫດການ + ໃຫ້ຄະແນນເຫດການ 30 ວັນ (ຈຸດເຕີມ/ບິນ/ຄວາມສົມເຫດ/ຄົນຂັບຢືນຢັນ)
  *
@@ -37,10 +38,11 @@ async function main() {
     console.log(`sync refuel events …`);
     const r = await syncRefuels({
       backfillDays: Number(val("--refuel-days") ?? 7),
+      rescanDays: val("--rescan-days") ? Number(val("--rescan-days")) : undefined,
       concurrency: Number(val("--concurrency") ?? 3),
       log: (s) => console.log("  " + s),
     });
-    console.log(`  ✓ ${r.vehicles} ຄັນ sensor · ເຕີມ ${r.events} ເຫດການ (${Math.round((Date.now() - t1) / 1000)} ວິ)`);
+    console.log(`  ✓ ${r.vehicles} ຄັນ (ມີ % ນ້ຳມັນ) · ເຕີມ ${r.events} ເຫດການ (${Math.round((Date.now() - t1) / 1000)} ວິ)`);
   }
 
   // ຈຸດເຕີມໃໝ່ຈາກ cluster (≥ 3 ຄັ້ງ/150 m) + ໃຫ້ຄະແນນເຫດການ 30 ວັນ (ຈຸດເຕີມ · ບິນ · ຄວາມສົມເຫດ · ຄົນຂັບຢືນຢັນ)

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Badge, EmptyRow, Table, Td, Th } from "@/components/ui";
 import { VehicleEdit, type BranchOption, type DeptOption, type DivisionOption } from "./vehicle-edit";
@@ -219,7 +220,9 @@ export function VehicleTable({
           {shown.map((v) => (
             <tr key={v.id}>
               <Td className="font-medium">
-                {v.plateNo}
+                <Link href={`/fleet/vehicles/${v.id}`} className="text-primary hover:underline" title="ປະຫວັດການເຕີມນ້ຳມັນ">
+                  {v.plateNo}
+                </Link>
                 {v.plateNo.startsWith("GPS-") && (
                   <span className="ml-2 text-xs font-normal text-amber-600">ບໍ່ມີປ້າຍໃນ GPS</span>
                 )}

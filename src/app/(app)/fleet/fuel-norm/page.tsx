@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { Badge, EmptyRow, PageHeader, StatCard, Table, Td, Th, inputClass } from "@/components/ui";
@@ -77,6 +78,14 @@ export default async function FuelNormPage({
   return (
     <>
       {header}
+
+      <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
+        ℹ️ ມາດຕະຖານທີ່<b>ລະບົບໃຊ້ຈິງ</b> (ເພື່ອແກ້ຄ່ານ້ຳມັນທີ່ GPS ຄິດເພື້ອນ) ຄິດຈາກ <b>ບິນຈິງ</b> ກ່ອນ ແລ້ວຈຶ່ງ GPS —{" "}
+        ເບິ່ງຜົນທີ່ໜ້າ{" "}
+        <Link href="/fleet/fuel" className="font-semibold underline">ລາຍງານນ້ຳມັນ</Link> ແລະ{" "}
+        <Link href="/fleet/fuel/cost" className="font-semibold underline">ຕົ້ນທຶນ / ກວດບິນ</Link>.
+        ໜ້ານີ້ສະແດງ <b>ຄ່າວັດຈາກ GPS ລາຍວັນ</b> ໄວ້ໃຫ້ກວດເຊັນເຊີເປັນຄັນໆ.
+      </div>
 
       <form method="get" className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
         <label className="block">

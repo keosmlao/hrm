@@ -2,7 +2,7 @@
 
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import { MENU, type IconName } from "@/lib/menu";
+import { MENU, menuForPath, type IconName } from "@/lib/menu";
 
 /** spinner ນ້ອຍໆ ຕອນກົດ link ແລ້ວກຳລັງໂຫຼດໜ້າໃໝ່ */
 function NavPending() {
@@ -37,6 +37,9 @@ function NavIcon({ name }: { name: IconName }) {
 export function Sidebar({ allowed }: { allowed: string[] }) {
   const visible = new Set(allowed);
   const pathname = usePathname();
+  // ⚠ ຢ່າໃຊ້ startsWith ຊື່ໆ — `/fleet/fuel/review` ຈະຕິດໄຟທັງ "ລາຍງານນ້ຳມັນ" ແລະ "ກວດເຫດການນ້ຳມັນ".
+  // menuForPath ເອົາ href ທີ່ຍາວສຸດທີ່ກົງ ຈຶ່ງເຫຼືອອັນດຽວ (ໜ້າຍ່ອຍທີ່ເຊື່ອງ → ບໍ່ມີອັນໃດຕິດໄຟ)
+  const activeKey = menuForPath(pathname)?.key ?? null;
 
   return (
     <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
@@ -50,8 +53,7 @@ export function Sidebar({ allowed }: { allowed: string[] }) {
             </p>
             <ul className="space-y-0.5">
               {items.map((item) => {
-                const active =
-                  pathname === item.href || pathname.startsWith(item.href + "/");
+                const active = item.key === activeKey;
                 return (
                   <li key={item.href}>
                     <Link

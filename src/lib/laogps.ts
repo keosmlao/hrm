@@ -398,16 +398,23 @@ async function getWithMeta<T, M = Record<string, unknown>>(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** ງົບເວລາລໍລາຍງານທີ່ຕອບ 202 — ຕັ້ງດ້ວຍ GPS_OPENAPI_POLL_SECONDS (cron ຕັ້ງໃຫ້ຍາວໄດ້) */
+const LAOGPS_POLL_BUDGET_MS = (Number(process.env.GPS_OPENAPI_POLL_SECONDS) || 55) * 1000;
+
 /**
  * ເອີ້ນ endpoint ທີ່ອາດຕອບ HTTP 202 (ກຳລັງຄຳນວນຢູ່ເບື້ອງຫຼັງ) —
- * ຍິງຄຳຂໍເດີມຊ້ຳຈົນໄດ້ຜົນ ຫຼື ໝົດ attempts.
+ * ຍິງຄຳຂໍເດີມຊ້ຳຈົນໄດ້ຜົນ ຫຼື ໝົດເວລາ budgetMs (ນັບລວມທັງເວລາລໍ ແລະ ເວລາຂອງຄຳຂໍ).
+ * ໜ້າເວັບໃຊ້ budget ສັ້ນ (ຜູ້ໃຊ້ລໍຢູ່) · cron/script ສົ່ງ budget ຍາວໄດ້.
  */
-async function getPolling<T>(path: string, query: Query, attempts = 6): Promise<T> {
-  for (let i = 0; i < attempts; i++) {
+async function getPolling<T>(path: string, query: Query, budgetMs = LAOGPS_POLL_BUDGET_MS): Promise<T> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
     const { status, body } = await call<T>(path, query);
     if (status !== 202 && body.data != null) return body.data;
     const retryAfter = Number((body.meta as Record<string, unknown>)?.retry_after_seconds) || 5;
-    if (i < attempts - 1) await sleep(Math.min(retryAfter, 10) * 1000);
+    const waitMs = Math.min(retryAfter, 10) * 1000;
+    if (Date.now() + waitMs >= deadline) break;
+    await sleep(waitMs);
   }
   throw new LaoGpsError(
     "REPORT_FAILED",
@@ -510,13 +517,15 @@ export function listDriverBehaviour(opts: {
   to: string;
   timeFrom?: string;
   timeTo?: string;
+  /** ງົບເວລາລໍ (ms) — ໃສ່ຍາວກວ່າປົກກະຕິໄດ້ໃນ cron/script */
+  budgetMs?: number;
 }): Promise<LaoGpsDriverBehaviour[]> {
   return getPolling<LaoGpsDriverBehaviour[]>("/driver-behaviour", {
     from: opts.from,
     to: opts.to,
     time_from: opts.timeFrom,
     time_to: opts.timeTo,
-  });
+  }, opts.budgetMs);
 }
 
 /** ຄະແນນຄົນຂັບ ລົດຄັນດຽວ */

@@ -16,15 +16,21 @@ export type GpsVehicleOption = {
   imei: string;
   plateNo: string | null;
   name: string | null;
+  /** ພະແນກເຈົ້າຂອງລົດ — ໃຊ້ຈັດກຸ່ມຕົວເລືອກ/ກັ່ນຕອງ */
+  department: string | null;
 };
 
 /** ລົດ HRM ທີ່ຕັ້ງ GPS IMEI ແລ້ວ — ໃຊ້ເປັນຕົວເລືອກໃນໜ້າລາຍງານ */
 export async function gpsVehicleOptions(): Promise<GpsVehicleOption[]> {
-  const rows = await prisma.carVehicle.findMany({
-    where: { gpsImei: { not: null } },
-    select: { id: true, gpsImei: true, plateNo: true, name: true },
-    orderBy: { plateNo: "asc" },
-  });
+  const [rows, departments] = await Promise.all([
+    prisma.carVehicle.findMany({
+      where: { gpsImei: { not: null } },
+      select: { id: true, gpsImei: true, plateNo: true, name: true, departmentCode: true },
+      orderBy: { plateNo: "asc" },
+    }),
+    prisma.department.findMany({ select: { code: true, nameLo: true } }),
+  ]);
+  const deptName = new Map(departments.map((d) => [d.code, d.nameLo]));
   return rows
     .filter((r) => r.gpsImei?.trim())
     .map((r) => ({
@@ -32,6 +38,7 @@ export async function gpsVehicleOptions(): Promise<GpsVehicleOption[]> {
       imei: r.gpsImei!.trim(),
       plateNo: r.plateNo,
       name: r.name,
+      department: (r.departmentCode && deptName.get(r.departmentCode)) || null,
     }));
 }
 

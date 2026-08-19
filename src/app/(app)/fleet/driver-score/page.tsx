@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireRole } from "@/lib/auth";
 import { Badge, EmptyRow, PageHeader, StatCard, Table, Td, Th } from "@/components/ui";
 import {
@@ -60,6 +61,11 @@ export default async function DriverScorePage({
   return (
     <>
       {header}
+      <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
+        ℹ️ ໜ້ານີ້ຖືກ<b>ລວມເຂົ້າ</b> “ສະຫຼຸບ GPS ປະຈຳເດືອນ” ແລ້ວ (ມີຄະແນນ, ເກີນຄວາມໄວ, ກ້ອງແຈ້ງ, ຈອດຕິດເຄື່ອງ ຄົບ ພ້ອມ CSV/ພິມ ແລະ ແຍກຕາມພະແນກ) —{" "}
+        <Link href="/fleet/gps-summary?sort=safety" className="font-semibold underline">ໄປໜ້າໃໝ່ (ຮຽງຄະແນນຕ່ຳສຸດກ່ອນ) →</Link>
+        <span className="block text-[11px] text-sky-800/80">ໜ້ານີ້ຄົງໄວ້ໃຫ້ລິງເກົ່າໃຊ້ໄດ້ ແລະ ເມື່ອຢາກເລືອກຊ່ວງວັນເອງ (ບໍ່ແມ່ນລາຍເດືອນ)</span>
+      </div>
       <GpsFilter action="/fleet/driver-score" from={from} to={to} maxDays={MAX_DAYS} note={note} />
 
       {error && <GpsNotice title="ດຶງຄະແນນການຂັບຂີ່ບໍ່ໄດ້" detail={error} />}

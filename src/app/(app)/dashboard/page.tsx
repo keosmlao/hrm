@@ -11,7 +11,8 @@ import {
   Td,
   Th,
 } from "@/components/ui";
-import { kip, laoDate } from "@/lib/format";
+import { kip, laoDate, laoDateTime } from "@/lib/format";
+import { fuelDropAlerts, fuelReviewCounts } from "@/lib/fuel-alerts";
 
 export default async function DashboardPage() {
   const session = await requireUser();
@@ -67,6 +68,12 @@ export default async function DashboardPage() {
   ]);
 
   const deptName = new Map(departments.map((d) => [d.code, d.nameLo]));
+
+  // 🔔 ແຈ້ງເຕືອນນ້ຳມັນ (cron gps:sync-fuel ຂຽນເຫດການໄວ້ · ອ່ານຈາກ DB ເທົ່ານັ້ນ)
+  const canReviewFleet = hasRole(session, "ADMIN", "HR", "MANAGER");
+  const [fuelDrops, reviewCounts] = canReviewFleet
+    ? await Promise.all([fuelDropAlerts(14, 5), fuelReviewCounts(45)])
+    : [[], { drops: 0, lowConfidence: 0, noReceipt: 0 }];
 
   const monthlyCost =
     Number(salaryCost._sum.baseSalary ?? 0) +
@@ -131,6 +138,47 @@ export default async function DashboardPage() {
           <StatCard label="ພະແນກ" value={departments.length} />
         )}
       </div>
+
+      {canReviewFleet && fuelDrops.length > 0 && (
+        <section className="mb-6 overflow-hidden rounded-xl border border-rose-200 bg-rose-50">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rose-200 px-4 py-3">
+            <div>
+              <h2 className="text-sm font-bold text-rose-900">🩸 ນ້ຳມັນຫຼຸດຂະນະລົດຈອດ ({reviewCounts.drops})</h2>
+              <p className="text-[11px] text-rose-800/80">
+                ລົດຈອດຢູ່ ບໍ່ໄດ້ແລ່ນ ແຕ່ລະດັບນ້ຳມັນຫຼຸດ — ອາດຖືກດູດ, ຮົ່ວ ຫຼື ເຊັນເຊີກະໂດດ · ກວດແລ້ວກົດຕັດສິນເພື່ອປິດແຈ້ງເຕືອນ
+              </p>
+            </div>
+            <Link href="/fleet/fuel/review" className="rounded-md bg-rose-700 px-3 py-2 text-xs font-medium text-white hover:bg-rose-800">
+              ໄປກວດ →
+            </Link>
+          </div>
+          <ul className="divide-y divide-rose-200 text-xs">
+            {fuelDrops.map((a) => (
+              <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2">
+                <span className="min-w-0">
+                  <span className="font-semibold text-rose-900">
+                    {a.vehicleId ? (
+                      <Link href={`/fleet/vehicles/${a.vehicleId}`} className="hover:underline">{a.plate}</Link>
+                    ) : (
+                      a.plate
+                    )}
+                  </span>
+                  <span className="ml-2 text-rose-800/80">
+                    {laoDateTime(new Date(a.at))} · ຫຼຸດ {a.litre} ລ ({a.beforePct}% → {a.afterPct}%)
+                    {a.stopMinutes != null && ` · ຈອດ ${a.stopMinutes} ນທ`}
+                  </span>
+                  {a.address && <span className="block truncate text-[11px] text-rose-800/60">{a.address}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {(reviewCounts.lowConfidence > 0 || reviewCounts.noReceipt > 0) && (
+            <p className="border-t border-rose-200 px-4 py-2 text-[11px] text-rose-800/80">
+              ຍັງມີ {reviewCounts.lowConfidence} ເຫດການຄວາມໝັ້ນໃຈຕ່ຳ ແລະ {reviewCounts.noReceipt} ການເຕີມທີ່ຍັງບໍ່ພົບບິນ ລໍກວດຢູ່
+            </p>
+          )}
+        </section>
+      )}
 
       {withoutProfile > 0 && canSeeCost && (
         <p className="mb-6 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">

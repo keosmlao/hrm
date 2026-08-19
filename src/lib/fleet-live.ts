@@ -38,6 +38,8 @@ export type VehiclePosition = {
   // trip ທີ່ກຳລັງໃຊ້ລົດຄັນນີ້ມື້ນີ້ (ຖ້າມີ)
   tripDestination: string | null;
   driverName: string | null;
+  /** ພະແນກເຈົ້າຂອງລົດ (ຈາກ app_car_vehicles.department_code) */
+  department: string | null;
 };
 
 /** ຕຳແໜ່ງລົດປັດຈຸບັນ ທຸກຄັນທີ່ມີ GPS */
@@ -45,10 +47,11 @@ export async function vehiclePositions(): Promise<VehiclePosition[]> {
   const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
     `select v.id::text id, trim(v.gps_imei) imei, v.plate_no, v.name, v.status,
             g.lat, g.lng, g.speed, g.heading, g.engine_state, g.mileage,
-            g.recorded_at, g.address,
+            g.recorded_at, g.address, dep.department_name_lo department,
             tr.destination trip_destination, emp.fullname_lo driver_name
        from app_car_vehicles v
        left join odg_tms_gps_current g on trim(g.imei) = trim(v.gps_imei)
+       left join odg_department dep on dep.department_code = v.department_code
        left join lateral (
          select destination, driver_code
            from hrm_vehicle_trip t
@@ -82,6 +85,7 @@ export async function vehiclePositions(): Promise<VehiclePosition[]> {
     address: (r.address as string) ?? null,
     tripDestination: (r.trip_destination as string) ?? null,
     driverName: (r.driver_name as string) ?? null,
+    department: (r.department as string) ?? null,
   }));
 }
 
@@ -102,8 +106,10 @@ export async function livePositions(): Promise<VehiclePosition[]> {
       listPositions({ activeOnly: false }),
       prisma.$queryRawUnsafe<Record<string, unknown>[]>(
         `select v.id::text id, v.plate_no, v.name, v.status, trim(v.gps_imei) imei,
+                dep.department_name_lo department,
                 tr.destination trip_destination, emp.fullname_lo driver_name
            from app_car_vehicles v
+           left join odg_department dep on dep.department_code = v.department_code
            left join lateral (
              select destination, driver_code
                from hrm_vehicle_trip t
@@ -143,6 +149,7 @@ export async function livePositions(): Promise<VehiclePosition[]> {
         address: p?.address ?? null,
         tripDestination: (r.trip_destination as string) ?? null,
         driverName: (r.driver_name as string) ?? null,
+        department: (r.department as string) ?? null,
       };
     });
   } catch {

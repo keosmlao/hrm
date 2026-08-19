@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { laoWorkDate } from "@/lib/attendance";
+import { GONE_STATUS } from "@/lib/employee-status";
 
 const schema = z.object({
   code: z.string().min(1, "ຕ້ອງມີລະຫັດພະນັກງານ"),
@@ -88,6 +89,25 @@ function profileData(v: Values) {
   };
 }
 
+/**
+ * ສະຖານະ ERP ທີ່ຄວນເປັນ ຫຼັງ HR ຕັ້ງ `hr_status`.
+ *
+ * `odg_employee.employment_status` ຄືແຫຼ່ງຄວາມຈິງທີ່ລະບົບອື່ນອ່ານ (ຄົນຂັບ, ເງິນເດືອນ,
+ * ລົງເວລາ) ຈຶ່ງຕ້ອງອັບເດດພ້ອມກັນ ບໍ່ດັ່ງນັ້ນຄົນລາອອກແລ້ວຍັງຖືວ່າ "ເຮັດວຽກຢູ່".
+ *
+ * ປ່ຽນສະເພາະເມື່ອສອງຝັ່ງຂັດກັນແທ້ — ຄ່າອື່ນຂອງ ERP (ເຊັ່ນ INACTIVE) ຄົງໄວ້ຄືເກົ່າ.
+ */
+function nextEmploymentStatus(
+  hrStatus: Values["hrStatus"],
+  current: string | null | undefined,
+): string | null {
+  const goneHr = (GONE_STATUS as readonly string[]).includes(hrStatus);
+  const goneErp = (GONE_STATUS as readonly string[]).includes(current ?? "");
+  if (goneHr) return hrStatus === current ? null : hrStatus;
+  if (goneErp) return "ACTIVE";
+  return null;
+}
+
 function fieldErrors(issues: z.ZodIssue[]) {
   const e: Record<string, string> = {};
   for (const i of issues) e[String(i.path[0])] = i.message;
@@ -110,7 +130,7 @@ export async function createEmployee(
   await prisma.employee.create({
     data: {
       code: v.code,
-      employmentStatus: "ACTIVE",
+      employmentStatus: nextEmploymentStatus(v.hrStatus, "ACTIVE") ?? "ACTIVE",
       ...employeeData(v),
       profile: { create: profileData(v) },
     },
@@ -147,9 +167,15 @@ export async function updateEmployee(
   });
   if (!before) return { error: "ບໍ່ພົບພະນັກງານ" };
 
+  // ຕັ້ງ hr_status ວ່າລາອອກ/ຖືກໃຫ້ອອກ → ຕ້ອງໃຫ້ ERP ຮູ້ນຳ ບໍ່ດັ່ງນັ້ນຍັງນັບເປັນຄົນເຮັດວຽກຢູ່
+  const employmentStatus = nextEmploymentStatus(v.hrStatus, before.employmentStatus);
+
   await prisma.employee.update({
     where: { code },
-    data: employeeData(v),
+    data: {
+      ...employeeData(v),
+      ...(employmentStatus ? { employmentStatus } : {}),
+    },
   });
 
   await prisma.employeeProfile.upsert({
@@ -221,7 +247,9 @@ export async function updateEmployee(
       action: "UPDATE",
       entityType: "Employee",
       entityId: code,
-      detail: `ແກ້ໄຂຂໍ້ມູນພະນັກງານ ${code}`,
+      detail: employmentStatus
+        ? `ແກ້ໄຂຂໍ້ມູນພະນັກງານ ${code} · ສະຖານະການຈ້າງ ${before.employmentStatus ?? "-"} → ${employmentStatus}`
+        : `ແກ້ໄຂຂໍ້ມູນພະນັກງານ ${code}`,
     },
   });
 

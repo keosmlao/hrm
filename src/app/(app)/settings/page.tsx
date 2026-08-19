@@ -4,6 +4,12 @@ import { PageHeader } from "@/components/ui";
 
 const SETTING_MENUS = [
   {
+    href: "/settings/units",
+    title: "ໜ່ວຍງານ",
+    description: "ເພີ່ມ–ແກ້ໄຂໜ່ວຍງານໃນແຕ່ລະພະແນກ",
+    mark: "⬡",
+  },
+  {
     href: "/settings/attendance",
     title: "ການລົງເວລາ",
     description: "ຮອບສະຫຼຸບການລົງເວລາປະຈຳເດືອນ",

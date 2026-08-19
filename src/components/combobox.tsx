@@ -131,7 +131,11 @@ export function Combobox({
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+        // ຢູ່ໃນ <label> ຄລິກໃສ່ລາຍການຈະຖືກສົ່ງຕໍ່ໄປກົດປຸ່ມ ແລ້ວເປີດລາຍການຄືນ — ກັນໄວ້
+        <div
+          onClick={(e) => e.preventDefault()}
+          className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-border bg-card shadow-lg"
+        >
           {showSearch && (
             <div className="border-b border-border p-2">
               <input

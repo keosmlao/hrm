@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireUser, hasRole } from "@/lib/auth";
-import { Badge, Card, PageHeader, StatCard } from "@/components/ui";
+import { Badge, Card, LinkButton, PageHeader, StatCard } from "@/components/ui";
 import { HeadPicker } from "./head-picker";
 import { OrgChart3D, type ChartNode } from "./org-chart-3d";
 import type { OrgScope, Prisma } from "@/generated/prisma/client";
@@ -210,6 +210,11 @@ export default async function OrgPage({
       <PageHeader
         title="ໂຄງສ້າງອົງກອນ"
         subtitle="ຝ່າຍ → ພະແນກ → ໜ່ວຍງານ · ກຳນົດຫົວໜ້າແຕ່ລະໜ່ວຍ (1 ຄົນເປັນຫົວໜ້າໄດ້ຫຼາຍໜ່ວຍ)"
+        action={
+          canManage ? (
+            <LinkButton href="/settings/units">ກຳນົດໜ່ວຍງານ</LinkButton>
+          ) : undefined
+        }
       />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-4">

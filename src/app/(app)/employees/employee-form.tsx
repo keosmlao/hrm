@@ -10,7 +10,7 @@ import type { FormState } from "./actions";
 export type Options = {
   divisions: { code: string; name: string }[];
   departments: { code: string; name: string; divisionCode: string }[];
-  units: { code: string; name: string; departmentCode: string }[];
+  units: { code: string; name: string; departmentCode: string; isActive?: boolean }[];
   positions: { code: string; name: string }[];
   employees: { code: string; name: string }[];
 };
@@ -60,9 +60,13 @@ export function EmployeeForm({
   const [state, formAction, pending] = useActionState<FormState, FormData>(action, {});
   const err = (f: string) => state.fieldErrors?.[f];
 
-  // ໜ່ວຍງານກັ່ນຕາມພະແນກທີ່ເລືອກ
+  // ໜ່ວຍງານກັ່ນຕາມພະແນກທີ່ເລືອກ — ໜ່ວຍທີ່ປິດໃຊ້ງານແລ້ວເຊື່ອງໄວ້ ເວັ້ນແຕ່ຄົນນີ້ຢູ່ໜ່ວຍນັ້ນຢູ່
   const [deptCode, setDeptCode] = useState(values.departmentCode ?? "");
-  const units = options.units.filter((u) => u.departmentCode === deptCode);
+  const units = options.units.filter(
+    (u) =>
+      u.departmentCode === deptCode &&
+      (u.isActive !== false || u.code === values.unitCode),
+  );
 
   return (
     <form action={formAction} className="space-y-6">

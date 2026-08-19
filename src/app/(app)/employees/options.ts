@@ -26,6 +26,7 @@ export async function loadOptions(): Promise<Options> {
       code: u.code,
       name: u.nameLo,
       departmentCode: u.departmentCode,
+      isActive: u.isActive !== false,
     })),
     positions: positions.map((p) => ({ code: p.code, name: p.nameLo })),
     employees: employees.map((e) => ({ code: e.code, name: e.fullnameLo })),

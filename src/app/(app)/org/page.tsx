@@ -212,7 +212,10 @@ export default async function OrgPage({
         subtitle="ຝ່າຍ → ພະແນກ → ໜ່ວຍງານ · ກຳນົດຫົວໜ້າແຕ່ລະໜ່ວຍ (1 ຄົນເປັນຫົວໜ້າໄດ້ຫຼາຍໜ່ວຍ)"
         action={
           canManage ? (
-            <LinkButton href="/settings/units">ກຳນົດໜ່ວຍງານ</LinkButton>
+            <div className="flex gap-2">
+              <LinkButton href="/settings/units">ກຳນົດໜ່ວຍງານ</LinkButton>
+              <LinkButton href="/settings/positions">ກຳນົດຕຳແໜ່ງ</LinkButton>
+            </div>
           ) : undefined
         }
       />

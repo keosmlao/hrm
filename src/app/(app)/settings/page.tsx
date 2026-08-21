@@ -10,6 +10,12 @@ const SETTING_MENUS = [
     mark: "⬡",
   },
   {
+    href: "/settings/positions",
+    title: "ຕຳແໜ່ງ",
+    description: "ເພີ່ມ–ແກ້ໄຂຕຳແໜ່ງງານ ແລະ ລະດັບຫົວໜ້າ",
+    mark: "◈",
+  },
+  {
     href: "/settings/attendance",
     title: "ການລົງເວລາ",
     description: "ຮອບສະຫຼຸບການລົງເວລາປະຈຳເດືອນ",

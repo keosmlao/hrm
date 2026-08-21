@@ -84,6 +84,7 @@ export const MENU: MenuGroup[] = [
     items: [
       { key: "settings.permissions", href: "/settings/permissions", label: "ສິດການເຂົ້າໃຊ້ເມນູ", icon: "settings", defaultRoles: ["ADMIN"] },
       { key: "settings.units", href: "/settings/units", label: "ກຳນົດໜ່ວຍງານ", icon: "org", defaultRoles: MANAGE },
+      { key: "settings.positions", href: "/settings/positions", label: "ກຳນົດຕຳແໜ່ງ", icon: "org", defaultRoles: MANAGE },
       { key: "settings.attendance", href: "/settings/attendance", label: "ຕັ້ງຄ່າການລົງເວລາ", icon: "settings", defaultRoles: MANAGE },
       { key: "settings.shifts", href: "/settings/shifts", label: "ຕັ້ງຄ່າກະເຮັດວຽກ", icon: "settings", defaultRoles: MANAGE },
       { key: "settings.leave", href: "/settings/leave", label: "ຕັ້ງຄ່າການລາ", icon: "settings", defaultRoles: MANAGE },

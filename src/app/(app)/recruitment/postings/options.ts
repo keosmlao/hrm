@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { listPositions } from "@/lib/positions";
 
 export type PostingOptions = {
   departments: { code: string; name: string }[];
@@ -9,7 +10,7 @@ export type PostingOptions = {
 export async function loadPostingOptions(): Promise<PostingOptions> {
   const [departments, positions] = await Promise.all([
     prisma.department.findMany({ orderBy: { code: "asc" } }),
-    prisma.position.findMany({ orderBy: { code: "asc" } }),
+    listPositions(),
   ]);
   return {
     departments: departments.map((d) => ({

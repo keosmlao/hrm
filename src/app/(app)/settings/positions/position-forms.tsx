@@ -2,6 +2,11 @@
 
 import { useActionState, useState } from "react";
 import { Button, Field, inputClass } from "@/components/ui";
+import {
+  DEFAULT_POSITION_LEVEL,
+  MANAGER_POSITION_LEVEL,
+  POSITION_LEVELS,
+} from "@/lib/position-level";
 import { createPosition, type PositionFormState } from "./actions";
 
 /**
@@ -31,13 +36,19 @@ export function NewPositionForm({ positionCodes }: { positionCodes: string[] }) 
   /** null = ຍັງບໍ່ໄດ້ພິມເອງ → ໃຊ້ລະຫັດທີ່ແນະນຳໃຫ້ */
   const [typedCode, setTypedCode] = useState<string | null>(null);
   const [handledSuccess, setHandledSuccess] = useState<string | undefined>();
+  const [isManager, setIsManager] = useState(false);
+  /** null = ຍັງບໍ່ໄດ້ເລືອກເອງ → ຕິດຕາມຊ່ອງ "ລະດັບຫົວໜ້າ" ໃຫ້ */
+  const [pickedLevel, setPickedLevel] = useState<number | null>(null);
 
   const code = typedCode ?? suggestPositionCode(positionCodes);
+  const level = pickedLevel ?? (isManager ? MANAGER_POSITION_LEVEL : DEFAULT_POSITION_LEVEL);
 
   // ບັນທຶກສຳເລັດ → React ລ້າງຊ່ອງທີ່ບໍ່ຄວບຄຸມໃຫ້ແລ້ວ ເຫຼືອລະຫັດທີ່ຕ້ອງກັບໄປໃຊ້ຄ່າແນະນຳໃໝ່
   if (state.success && state.success !== handledSuccess) {
     setHandledSuccess(state.success);
     setTypedCode(null);
+    setIsManager(false);
+    setPickedLevel(null);
   }
 
   return (
@@ -63,12 +74,36 @@ export function NewPositionForm({ positionCodes }: { positionCodes: string[] }) 
 
       <Field label="ລະດັບຫົວໜ້າ" hint="ຄົນທີ່ຖືຕຳແໜ່ງນີ້ ເຂົ້າລະບົບເປັນສິດ MANAGER">
         <label className="flex h-10 items-center gap-2 text-sm">
-          <input name="isManager" type="checkbox" />
+          <input
+            name="isManager"
+            type="checkbox"
+            checked={isManager}
+            onChange={(e) => setIsManager(e.target.checked)}
+          />
           ເປັນຫົວໜ້າ / ຜູ້ຈັດການ
         </label>
       </Field>
 
-      <div className="flex items-end md:col-span-3">
+      <Field label="ລະດັບຕຳແໜ່ງ" required hint="ໃຊ້ຈັດລຳດັບໃນຜັງອົງກອນ ແລະ ລາຍການຕຳແໜ່ງ">
+        <select
+          name="level"
+          value={level}
+          onChange={(e) => setPickedLevel(Number(e.target.value))}
+          className={inputClass}
+        >
+          {POSITION_LEVELS.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label="ລຳດັບແສດງ" hint="ນ້ອຍມາກ່ອນ — ໃຊ້ຈັດລຳດັບພາຍໃນລະດັບດຽວກັນ">
+        <input name="sortOrder" type="number" min={0} max={999} defaultValue={0} className={inputClass} />
+      </Field>
+
+      <div className="flex items-end md:col-span-2">
         <Button type="submit" disabled={pending}>
           {pending ? "ກຳລັງບັນທຶກ..." : "+ ເພີ່ມຕຳແໜ່ງ"}
         </Button>

@@ -5,6 +5,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
+import {
+  DEFAULT_POSITION_LEVEL,
+  MANAGER_POSITION_LEVEL,
+  POSITION_LEVEL_VALUES,
+  positionLevelLabel,
+} from "@/lib/position-level";
 
 export type PositionFormState = { error?: string; success?: string };
 
@@ -19,6 +25,34 @@ const positionSchema = z.object({
   nameLo: z.string().trim().min(1).max(200),
   nameEn: z.string().trim().max(200).optional(),
 });
+
+/** ລະດັບຮັບສະເພາະຄ່າທີ່ມີໃນລາຍການ ສ່ວນລຳດັບແສດງເປັນຈຳນວນເຕັມ 0–999 */
+const levelSchema = z.coerce
+  .number()
+  .int()
+  .refine((value) => POSITION_LEVEL_VALUES.includes(value), "ລະດັບຕຳແໜ່ງບໍ່ຖືກຕ້ອງ");
+const sortOrderSchema = z.coerce.number().int().min(0).max(999);
+
+/**
+ * ອ່ານລະດັບ ແລະ ລຳດັບຈາກຟອມ — ຖ້າຊ່ອງຫວ່າງ/ຜິດຮູບແບບ ໃຫ້ໃຊ້ຄ່າສຳຮອງ
+ * (ບໍ່ຂັດການບັນທຶກ ເພາະຊື່ ແລະ ລະຫັດເປັນຂໍ້ມູນຫຼັກ)
+ */
+function readPositionSetting(formData: FormData, fallbackLevel: number, fallbackSortOrder: number) {
+  const level = levelSchema.safeParse(formData.get("level"));
+  const sortOrder = sortOrderSchema.safeParse(formData.get("sortOrder"));
+  return {
+    level: level.success ? level.data : fallbackLevel,
+    sortOrder: sortOrder.success ? sortOrder.data : fallbackSortOrder,
+  };
+}
+
+/** ຕາຕະລາງລະດັບເປັນຂອງ HRM ລ້ວນ — ຖ້າຍັງບໍ່ໄດ້ deploy migration ໃຫ້ຂ້າມໄປ ບໍ່ໃຫ້ລົ້ມທັງຄຳສັ່ງ */
+async function ignoreMissingTable(work: Promise<unknown>) {
+  await work.catch((e: { code?: string }) => {
+    if (e?.code === "P2021") return;
+    throw e;
+  });
+}
 
 function revalidatePositions() {
   revalidatePath("/settings/positions");
@@ -60,16 +94,25 @@ export async function createPosition(
   const existing = await prisma.position.findUnique({ where: { code }, select: { nameLo: true } });
   if (existing) return { error: `ລະຫັດ ${code} ຖືກໃຊ້ແລ້ວ (${existing.nameLo})` };
 
+  const { level, sortOrder } = readPositionSetting(
+    formData,
+    isManager ? MANAGER_POSITION_LEVEL : DEFAULT_POSITION_LEVEL,
+    0,
+  );
+
   await prisma.position.create({
     data: { code, nameLo, nameEn: nameEn || null, isManager, isActive: true },
   });
+  await ignoreMissingTable(
+    prisma.positionSetting.create({ data: { positionCode: code, level, sortOrder } }),
+  );
   await prisma.auditLog.create({
     data: {
       userId: session.userId,
       action: "CREATE",
       entityType: "Position",
       entityId: code,
-      detail: `${nameLo}${isManager ? " (ລະດັບຫົວໜ້າ)" : ""}`,
+      detail: `${nameLo} · ${positionLevelLabel(level)}${isManager ? " (ລະດັບຫົວໜ້າ)" : ""}`,
     },
   });
 
@@ -102,13 +145,34 @@ export async function updatePosition(code: string, formData: FormData) {
 
   const isManager = formData.get("isManager") === "on";
   const isActive = formData.get("isActive") === "on";
+  const currentSetting = await prisma.positionSetting
+    .findUnique({ where: { positionCode: code } })
+    .catch((e: { code?: string }) => {
+      if (e?.code === "P2021") return null;
+      throw e;
+    });
+  const previousLevel = currentSetting?.level ?? DEFAULT_POSITION_LEVEL;
+  const previousSortOrder = currentSetting?.sortOrder ?? 0;
+  const { level, sortOrder } = readPositionSetting(formData, previousLevel, previousSortOrder);
+
   await prisma.position.update({
     where: { code },
     data: { nameLo: parsed.data.nameLo, nameEn: parsed.data.nameEn || null, isManager, isActive },
   });
+  await ignoreMissingTable(
+    prisma.positionSetting.upsert({
+      where: { positionCode: code },
+      create: { positionCode: code, level, sortOrder },
+      update: { level, sortOrder },
+    }),
+  );
 
   const changes: string[] = [];
   if (current.nameLo !== parsed.data.nameLo) changes.push(`${current.nameLo} → ${parsed.data.nameLo}`);
+  if (previousLevel !== level) {
+    changes.push(`${positionLevelLabel(previousLevel)} → ${positionLevelLabel(level)}`);
+  }
+  if (previousSortOrder !== sortOrder) changes.push(`ລຳດັບ ${previousSortOrder} → ${sortOrder}`);
   if ((current.isManager ?? false) !== isManager) {
     changes.push(isManager ? "ຕັ້ງເປັນລະດັບຫົວໜ້າ" : "ຍົກເລີກລະດັບຫົວໜ້າ");
   }
@@ -162,6 +226,7 @@ export async function deletePosition(code: string) {
   }
 
   await prisma.position.delete({ where: { code } });
+  await ignoreMissingTable(prisma.positionSetting.deleteMany({ where: { positionCode: code } }));
   await prisma.auditLog.create({
     data: {
       userId: session.userId,

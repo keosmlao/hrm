@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { Card, EmptyRow, PageHeader, Table, Td, Th, inputClass } from "@/components/ui";
+import { POSITION_LEVELS } from "@/lib/position-level";
+import { listPositions } from "@/lib/positions";
 import { NewPositionForm } from "./position-forms";
 import { deletePosition, updatePosition } from "./actions";
 
@@ -13,7 +15,7 @@ export default async function PositionSettingsPage({
   const { positionMessage, positionError } = await searchParams;
 
   const [positions, staffPerPosition, postingsPerPosition] = await Promise.all([
-    prisma.position.findMany({ orderBy: { code: "asc" } }),
+    listPositions(),
     prisma.employee.groupBy({ by: ["positionCode"], _count: true }),
     prisma.jobPosting.groupBy({ by: ["positionCode"], _count: true }),
   ]);
@@ -25,7 +27,7 @@ export default async function PositionSettingsPage({
     <>
       <PageHeader
         title="ກຳນົດຕຳແໜ່ງ"
-        subtitle="ເພີ່ມ ແລະ ແກ້ໄຂຕຳແໜ່ງງານ — ໃຊ້ຢູ່ຟອມພະນັກງານ, ຜັງອົງກອນ, ການຮັບສະໝັກ ແລະ ກຳນົດສິດຕອນເຂົ້າລະບົບ"
+        subtitle="ເພີ່ມ ແລະ ແກ້ໄຂຕຳແໜ່ງງານ, ລະດັບ ແລະ ລຳດັບແສດງ — ໃຊ້ຢູ່ຟອມພະນັກງານ, ຜັງອົງກອນ, ການຮັບສະໝັກ ແລະ ກຳນົດສິດຕອນເຂົ້າລະບົບ"
       />
 
       <Card className="mb-6">
@@ -52,6 +54,8 @@ export default async function PositionSettingsPage({
             <Th className="w-28">ລະຫັດ</Th>
             <Th>ຊື່ຕຳແໜ່ງ (ລາວ)</Th>
             <Th>ຊື່ (ອັງກິດ)</Th>
+            <Th className="w-44">ລະດັບຕຳແໜ່ງ</Th>
+            <Th className="w-20">ລຳດັບ</Th>
             <Th className="w-24">ລະດັບຫົວໜ້າ</Th>
             <Th className="w-24">ພະນັກງານ</Th>
             <Th className="w-20">ເປີດໃຊ້</Th>
@@ -59,7 +63,7 @@ export default async function PositionSettingsPage({
           </tr>
         </thead>
         <tbody>
-          {positions.length === 0 && <EmptyRow colSpan={7} />}
+          {positions.length === 0 && <EmptyRow colSpan={9} />}
           {positions.map((position) => {
             const staff = staffCount.get(position.code) ?? 0;
             const postings = postingCount.get(position.code) ?? 0;
@@ -90,12 +94,32 @@ export default async function PositionSettingsPage({
                     className={inputClass}
                   />
                 </Td>
+                <Td>
+                  <select form={formId} name="level" defaultValue={position.level} className={inputClass}>
+                    {POSITION_LEVELS.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </Td>
+                <Td>
+                  <input
+                    form={formId}
+                    name="sortOrder"
+                    type="number"
+                    min={0}
+                    max={999}
+                    defaultValue={position.sortOrder}
+                    className={inputClass}
+                  />
+                </Td>
                 <Td className="text-center">
                   <input
                     form={formId}
                     name="isManager"
                     type="checkbox"
-                    defaultChecked={position.isManager === true}
+                    defaultChecked={position.isManager}
                   />
                 </Td>
                 <Td className="text-sm text-muted">{staff} ຄົນ</Td>
@@ -104,7 +128,7 @@ export default async function PositionSettingsPage({
                     form={formId}
                     name="isActive"
                     type="checkbox"
-                    defaultChecked={position.isActive !== false}
+                    defaultChecked={position.isActive}
                   />
                 </Td>
                 <Td>

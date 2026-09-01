@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { listPositions } from "@/lib/positions";
 import type { Options } from "./employee-form";
 
 export async function loadOptions(): Promise<Options> {
@@ -7,7 +8,7 @@ export async function loadOptions(): Promise<Options> {
     prisma.division.findMany({ orderBy: { code: "asc" } }),
     prisma.department.findMany({ orderBy: { code: "asc" } }),
     prisma.unit.findMany({ orderBy: { code: "asc" } }),
-    prisma.position.findMany({ orderBy: { code: "asc" } }),
+    listPositions(),
     prisma.employee.findMany({
       orderBy: { fullnameLo: "asc" },
       select: { code: true, fullnameLo: true },

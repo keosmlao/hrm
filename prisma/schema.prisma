@@ -69,6 +69,20 @@ model Position {
   @@map("odg_position")
 }
 
+/// ຂໍ້ມູນເສີມຂອງຕຳແໜ່ງທີ່ HRM ຕັ້ງເອງ (ລະດັບ ແລະ ລຳດັບແສດງ)
+/// ແຍກຕາຕະລາງເພາະ odg_position ເປັນຂອງ ERP ເກົ່າ — ຫ້າມເພີ່ມຖັນໃສ່
+/// ບໍ່ມີ FK ໄປຫາ odg_position ດ້ວຍເຫດຜົນດຽວກັນ (ຄຸມຄວາມຖືກຕ້ອງໃນ code)
+model PositionSetting {
+  positionCode String   @id @map("position_code") @db.VarChar(20)
+  level        Int      @default(60) @map("position_level")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([level, sortOrder])
+  @@map("hrm_position_setting")
+}
+
 /// ພະນັກງານຈິງ — ອ້າງອີງໂດຍ WMS, TMS, ລົດ, ເຂົ້າວຽກ ...
 /// ບໍ່ມີ relation ໄປຫາ odg_department/odg_position ໃນ Prisma ໂດຍເຈດຕະນາ
 /// (ຖ້າປະກາດ Prisma ຈະຢາກເພີ່ມ FK ໃສ່ຕາຕະລາງເກົ່າ — ເຮົາຫ້າມແຕະ)

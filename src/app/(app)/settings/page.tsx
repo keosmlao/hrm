@@ -12,7 +12,7 @@ const SETTING_MENUS = [
   {
     href: "/settings/positions",
     title: "ຕຳແໜ່ງ",
-    description: "ເພີ່ມ–ແກ້ໄຂຕຳແໜ່ງງານ ແລະ ລະດັບຫົວໜ້າ",
+    description: "ເພີ່ມ–ແກ້ໄຂຕຳແໜ່ງງານ, ລະດັບ ແລະ ລຳດັບແສດງ",
     mark: "◈",
   },
   {

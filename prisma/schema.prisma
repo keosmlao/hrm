@@ -1292,3 +1292,118 @@ model SmlAssetLocation {
 
   @@map("as_asset_location")
 }
+
+// ─────────────────────────────────────────────
+// ຄັງຄວາມຮູ້ (Knowledge Management)
+//
+// ຕາຕະລາງໃໝ່ລ້ວນ ຂຶ້ນຕົ້ນດ້ວຍ `hrm_kb_` — ບໍ່ແຕະ schema ຂອງ ERP.
+// ບໍ່ໃສ່ FK ໄປຫາ `odg_employee` ດ້ວຍເຫດຜົນດຽວກັບ `hrm_asset_assignment`
+// (ຕາຕະລາງ ERP sync ຈາກລະບົບພາຍນອກ — FK ຈະບລັອກຕອນ sync ລຶບແຖວຊົ່ວຄາວ).
+// ສະຖານະ/ການເຫັນ ເກັບເປັນ **text ບໍ່ແມ່ນ enum** — ຫຼີກກັບດັກ enum ຂອງ DB ຮ່ວມ
+// (ຄ່າທີ່ຮັບໄດ້ຢູ່ `src/lib/knowledge.ts`).
+// ─────────────────────────────────────────────
+
+model KbCategory {
+  id        String   @id @default(cuid())
+  nameLo    String   @map("name_lo")
+  parentId  String?  @map("parent_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  parent   KbCategory?  @relation("KbCategoryTree", fields: [parentId], references: [id])
+  children KbCategory[] @relation("KbCategoryTree")
+  articles KbArticle[]
+
+  @@index([parentId])
+  @@map("hrm_kb_category")
+}
+
+model KbArticle {
+  id         String  @id @default(cuid())
+  categoryId String? @map("category_id")
+  title      String
+  summary    String?
+  /// ເນື້ອໃນເປັນ Markdown — render ດ້ວຍ `src/lib/markdown.ts`
+  body       String
+  tags       String[] @default([])
+
+  /// DRAFT | PENDING | PUBLISHED | ARCHIVED
+  status String @default("DRAFT")
+  /// ALL | DEPARTMENT | ROLE
+  visibility         String   @default("ALL")
+  visibleDepartments String[] @default([]) @map("visible_departments")
+  visibleRoles       String[] @default([]) @map("visible_roles")
+
+  /// ຕ້ອງໃຫ້ພະນັກງານກົດ "ຮັບຮູ້" ຫຼັງອ່ານ
+  requiresAck Boolean @default(false) @map("requires_ack")
+  /// ເລກຮຸ່ນປັດຈຸບັນ — ເພີ່ມທຸກຄັ້ງທີ່ແກ້ເນື້ອໃນ, ໃຊ້ຄູ່ກັບການຮັບຮູ້
+  version   Int @default(1)
+  viewCount Int @default(0) @map("view_count")
+
+  authorCode   String?   @map("author_code") @db.VarChar(20)
+  publishedAt  DateTime? @map("published_at")
+  publishedBy  String?   @map("published_by")
+  rejectReason String?   @map("reject_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  category    KbCategory?        @relation(fields: [categoryId], references: [id])
+  versions    KbArticleVersion[]
+  attachments KbAttachment[]
+  acks        KbAcknowledgement[]
+
+  @@index([status])
+  @@index([categoryId])
+  @@map("hrm_kb_article")
+}
+
+/// ພາບຖ່າຍຂອງເນື້ອໃນແຕ່ລະຮຸ່ນ — ບັນທຶກ**ກ່ອນ**ຂຽນທັບ ຈຶ່ງຍ້ອນເບິ່ງຂອງເກົ່າໄດ້
+model KbArticleVersion {
+  id        String   @id @default(cuid())
+  articleId String   @map("article_id")
+  version   Int
+  title     String
+  summary   String?
+  body      String
+  note      String?
+  changedBy String?  @map("changed_by")
+  changedAt DateTime @default(now()) @map("changed_at")
+
+  article KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, version])
+  @@map("hrm_kb_article_version")
+}
+
+/// ໄຟລ໌ແນບ — ເກັບ **ນອກ** `public/` ແລ້ວເສີບຜ່ານ `/api/kb-file/[id]` ທີ່ກວດ session
+model KbAttachment {
+  id         String   @id @default(cuid())
+  articleId  String   @map("article_id")
+  name       String
+  storedName String   @map("stored_name")
+  mime       String
+  sizeBytes  Int      @map("size_bytes")
+  uploadedBy String?  @map("uploaded_by")
+  uploadedAt DateTime @default(now()) @map("uploaded_at")
+
+  article KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@map("hrm_kb_attachment")
+}
+
+/// ການຮັບຮູ້ຕໍ່ **ຮຸ່ນ** — ແກ້ນະໂຍບາຍແລ້ວຮຸ່ນປ່ຽນ ພະນັກງານຕ້ອງຮັບຮູ້ໃໝ່
+model KbAcknowledgement {
+  articleId    String   @map("article_id")
+  employeeCode String   @map("employee_code") @db.VarChar(20)
+  version      Int
+  ackedAt      DateTime @default(now()) @map("acked_at")
+
+  article KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, employeeCode, version])
+  @@index([employeeCode])
+  @@map("hrm_kb_ack")
+}

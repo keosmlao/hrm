@@ -54,3 +54,70 @@ a {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* ເນື້ອໃນບົດຄັງຄວາມຮູ້ — HTML ມາຈາກ `src/lib/markdown.ts` (escape ແລ້ວ) */
+.kb-prose {
+  line-height: 1.75;
+}
+.kb-prose > * + * {
+  margin-top: 0.9em;
+}
+.kb-prose h2 {
+  font-size: 1.35em;
+  font-weight: 600;
+  margin-top: 1.6em;
+}
+.kb-prose h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin-top: 1.4em;
+}
+.kb-prose h4,
+.kb-prose h5 {
+  font-weight: 600;
+  margin-top: 1.2em;
+}
+.kb-prose ul,
+.kb-prose ol {
+  padding-left: 1.5em;
+}
+.kb-prose ul {
+  list-style: disc;
+}
+.kb-prose ol {
+  list-style: decimal;
+}
+.kb-prose li + li {
+  margin-top: 0.35em;
+}
+.kb-prose a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.kb-prose blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.2em 0 0.2em 1em;
+  color: var(--muted);
+}
+.kb-prose code {
+  background: color-mix(in srgb, var(--primary) 8%, white);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+.kb-prose pre {
+  background: #2f2a2f;
+  color: #f4f5f7;
+  border-radius: 8px;
+  padding: 1em;
+  overflow-x: auto;
+}
+.kb-prose pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.kb-prose hr {
+  border-color: var(--border);
+}

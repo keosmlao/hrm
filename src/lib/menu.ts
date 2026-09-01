@@ -11,10 +11,19 @@ export type Role = "ADMIN" | "HR" | "MANAGER" | "EMPLOYEE" | "EXECUTIVE";
 
 export const ROLES: Role[] = ["ADMIN", "HR", "MANAGER", "EXECUTIVE", "EMPLOYEE"];
 
+/** ຊື່ສິດເປັນພາສາລາວ — ຢູ່ນີ້ເພາະ client component ກໍຕ້ອງໃຊ້ (auth.ts ເປັນ server-only) */
+export const ROLE_LABEL: Record<Role, string> = {
+  ADMIN: "ຜູ້ດູແລລະບົບ",
+  HR: "ຝ່າຍບຸກຄົນ",
+  MANAGER: "ຫົວໜ້າພະແນກ",
+  EMPLOYEE: "ພະນັກງານ",
+  EXECUTIVE: "ຜູ້ບໍລິຫານ",
+};
+
 export type IconName =
   | "dashboard" | "employees" | "attendance" | "leave" | "overtime" | "payroll"
   | "appraisal" | "org" | "recruitment" | "assets" | "fleet" | "trips"
-  | "profile" | "settings";
+  | "profile" | "settings" | "knowledge";
 
 export type MenuItem = {
   /** ລະຫັດຄົງທີ່ — ເກັບໃນ DB, ຢ່າປ່ຽນຫຼັງໃຊ້ງານແລ້ວ */
@@ -73,6 +82,13 @@ export const MENU: MenuGroup[] = [
       { key: "fleet.dailySlip", href: "/fleet/daily-slip", label: "ລາຍການໃບນຳໃຊ້ລົດ", icon: "trips", defaultRoles: FLEET, hiddenFromSidebar: true },
       { key: "fleet.monthlyPlan", href: "/fleet/monthly-plan", label: "ແຜນນຳໃຊ້ລົດ ລາຍເດືອນ", icon: "trips", defaultRoles: FLEET, hiddenFromSidebar: true },
       { key: "fleet.vehicles", href: "/fleet/vehicles", label: "ຈັດການລົດ", icon: "fleet", defaultRoles: MANAGE },
+    ],
+  },
+  {
+    title: "ຄັງຄວາມຮູ້",
+    items: [
+      { key: "knowledge", href: "/knowledge", label: "ຄັງຄວາມຮູ້", icon: "knowledge", defaultRoles: ALL },
+      { key: "knowledge.manage", href: "/knowledge/manage", label: "ຈັດການຄັງຄວາມຮູ້", icon: "knowledge", defaultRoles: MANAGE },
     ],
   },
   {

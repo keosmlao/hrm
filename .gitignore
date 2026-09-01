@@ -44,6 +44,8 @@ next-env.d.ts
 
 # runtime uploads
 /public/uploads/
+# ໄຟລ໌ແນບຄັງຄວາມຮູ້ — ນອກ webroot ໂດຍເຈດຕະນາ (ຕັ້ງ KB_UPLOAD_DIR ຕອນ deploy)
+/private-uploads/
 
 # ຂໍ້ມູນສຳຮອງ DB (ຢ່າຂຶ້ນ git)
 backups/

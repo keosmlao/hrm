@@ -34,10 +34,5 @@ export function canViewAllEmployees(session: SessionPayload) {
   return hasRole(session, "ADMIN", "HR", "EXECUTIVE");
 }
 
-export const ROLE_LABEL: Record<Role, string> = {
-  ADMIN: "ຜູ້ດູແລລະບົບ",
-  HR: "ຝ່າຍບຸກຄົນ",
-  MANAGER: "ຫົວໜ້າພະແນກ",
-  EMPLOYEE: "ພະນັກງານ",
-  EXECUTIVE: "ຜູ້ບໍລິຫານ",
-};
+// ຍ້າຍໄປ menu.ts ແລ້ວ (client component ຕ້ອງໃຊ້ນຳ) — ຄົງທາງ import ເກົ່າໄວ້
+export { ROLE_LABEL } from "./menu";

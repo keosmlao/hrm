@@ -4,6 +4,7 @@ import { getRequestEmployee } from "@/lib/employee-auth";
 import { getEmployeeAttendanceContext } from "@/lib/hrm-settings";
 import { getApprovalSteps, resolveStepApprovers, APPROVER_TYPE_LABEL } from "@/lib/trip-approvals";
 import { isVehicleApprover } from "@/lib/vehicle-approvals";
+import { employeeViewer, pendingAckCount } from "@/lib/kb-access";
 
 /** ສະຖານະປັດຈຸບັນຂອງພະນັກງານ — ຜ່ານ LINE (idToken) ຫຼື web portal (session) */
 export async function POST(request: NextRequest) {
@@ -117,6 +118,10 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // ຄັງຄວາມຮູ້ — ນັບສະເພາະບົດທີ່ຍັງຕ້ອງກົດຮັບຮູ້ ເພື່ອຂຶ້ນປ້າຍເຕືອນ
+  // (ລາຍການເຕັມດຶງຕອນເປີດແທັບ ຜ່ານ /api/employee-app/knowledge)
+  const knowledgePendingAck = await pendingAckCount(employeeViewer(employee, auth.actorRole));
+
   // ລົດທີ່ໃຫ້ພະນັກງານເລືອກເອງ (ERP, ບໍ່ retired)
   const cars = await prisma.carVehicle.findMany({ where: { status: { not: "retired" } }, select: { id: true, plateNo: true, name: true }, orderBy: { plateNo: "asc" } });
   const plateMap = new Map(cars.map((c) => [c.id.toString(), c.plateNo]));
@@ -146,6 +151,7 @@ export async function POST(request: NextRequest) {
     name: employee.fullnameLo,
     approvals,
     vehicleApprovals,
+    knowledge: { pendingAck: knowledgePendingAck },
     vehicles: cars.map((v) => ({ id: v.id.toString(), plateNo: v.plateNo, name: v.name })),
     profile: {
       title: employee.titleLo,

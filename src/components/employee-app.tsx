@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
+import { renderMarkdown } from "@/lib/markdown";
 
 export type Me =
   | {
@@ -23,11 +24,12 @@ export type Me =
       payslips: { id: string; year: number; month: number; status: string; grossPay: number; totalDeduction: number; netPay: number }[];
       trips: { id: string; date: string; endDate: string; tripNo: number; destination: string; departTime: string | null; returnTime: string | null; status: string; vehiclePlate: string | null; rejectReason: string | null; approvalLevel: number; totalApprovalSteps: number; currentStepLabel: string | null }[];
       approvals: { id: string; destination: string; requester: string; date: string; endDate: string; departTime: string | null; returnTime: string | null; tripNo: number; note: string | null; members: string[]; stepLabel: string; stepIndex: number; totalSteps: number }[];
+      knowledge: { pendingAck: number };
     }
   | { linked: false; lineName: string | null };
 
 type LinkedMe = Extract<Me, { linked: true }>;
-type AppTab = "HOME" | "LEAVE" | "OT" | "PAY" | "TRIP" | "PROFILE";
+type AppTab = "HOME" | "LEAVE" | "OT" | "PAY" | "TRIP" | "KB" | "PROFILE";
 
 const STATUS_LABEL: Record<string, string> = {
   DRAFT: "ຮ່າງ",
@@ -66,7 +68,7 @@ export function EmployeeApp({
   const [tab, setTabState] = useState<AppTab>(() => {
     if (typeof window === "undefined") return "HOME";
     const saved = window.localStorage.getItem("emp_tab");
-    return saved === "HOME" || saved === "LEAVE" || saved === "OT" || saved === "PAY" || saved === "TRIP" || saved === "PROFILE" ? saved : "HOME";
+    return saved === "HOME" || saved === "LEAVE" || saved === "OT" || saved === "PAY" || saved === "TRIP" || saved === "KB" || saved === "PROFILE" ? saved : "HOME";
   });
   const setTab = (next: AppTab) => {
     setTabState(next);
@@ -102,12 +104,20 @@ export function EmployeeApp({
           </div>
           {!me.today?.checkInAt ? <button onClick={() => onClock("IN")} disabled={busy} className="w-full rounded-xl bg-emerald-600 py-4 font-semibold text-white disabled:opacity-50">{busy ? "ກຳລັງບັນທຶກ..." : "ເຂົ້າວຽກ"}</button> : !me.today?.checkOutAt ? <button onClick={() => onClock("OUT")} disabled={busy} className="w-full rounded-xl bg-rose-600 py-4 font-semibold text-white disabled:opacity-50">{busy ? "ກຳລັງບັນທຶກ..." : "ອອກວຽກ"}</button> : <p className="rounded-xl bg-emerald-50 py-3 text-center text-sm font-medium text-emerald-700">✓ ລົງເວລາຄົບແລ້ວ · {fmtWorked(me.today.workedMinutes)}</p>}
         </section>
+        {me.knowledge.pendingAck > 0 && <button onClick={() => setTab("KB")} className="w-full rounded-2xl bg-sky-600 px-5 py-4 text-left text-white shadow-sm">
+          <p className="text-sm font-semibold">📖 ມີ {me.knowledge.pendingAck} ບົດທີ່ຕ້ອງອ່ານ ແລະ ຮັບຮູ້</p>
+          <p className="text-xs text-sky-50">ແຕະເພື່ອອ່ານ ນະໂຍບາຍ / ຄູ່ມືວຽກ ສະບັບຫຼ້າສຸດ</p>
+        </button>}
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <QuickCard label="ວັນລາເຫຼືອ" value={String(Math.max(0, me.leave.types.reduce((sum, item) => sum + item.remaining, 0)))} onClick={() => setTab("LEAVE")} />
           <QuickCard label="OT ຂອງຂ້ອຍ" value={String(me.overtime.length)} onClick={() => setTab("OT")} />
           <QuickCard label="ອອກຕະຫຼາດ / Trip" value={String(me.trips.length)} onClick={() => setTab("TRIP")} />
           <QuickCard label="ສະລິບ" value={String(me.payslips.length)} onClick={() => setTab("PAY")} />
         </section>
+        <button onClick={() => setTab("KB")} className="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-sm ring-1 ring-slate-200 hover:ring-emerald-300">
+          <p className="text-sm font-semibold">📚 ຄັງຄວາມຮູ້</p>
+          <p className="text-xs text-slate-500">ນະໂຍບາຍ, ຄູ່ມືວຽກ ແລະ ຂັ້ນຕອນປະຕິບັດງານ</p>
+        </button>
       </>}
 
       {tab === "LEAVE" && <Section title="ການລາຂອງຂ້ອຍ">
@@ -136,6 +146,8 @@ export function EmployeeApp({
         {me.trips.map((item) => <ListRow key={item.id} title={`${item.destination}${item.vehiclePlate ? ` · ${item.vehiclePlate}` : ""}`} subtitle={`${fmtTripRange(item.date, item.endDate)} · ຄັ້ງທີ ${item.tripNo}${item.departTime || item.returnTime ? ` · ${item.departTime ?? "—"}–${item.returnTime ?? "—"}` : ""}${item.status === "PENDING" && item.totalApprovalSteps > 0 ? ` · ຂັ້ນ ${item.approvalLevel + 1}/${item.totalApprovalSteps}${item.currentStepLabel ? ` (${item.currentStepLabel})` : ""}` : ""}`} status={item.status} />)}
       </Section>}
 
+      {tab === "KB" && <KnowledgeTab idToken={idToken} onAcked={onChanged} />}
+
       {tab === "PROFILE" && <Section title="ຂໍ້ມູນຂອງຂ້ອຍ">
         <ProfileRow label="ລະຫັດ" value={me.code} /><ProfileRow label="ຊື່" value={`${me.profile.title ?? ""} ${me.name}`} /><ProfileRow label="ຕຳແໜ່ງ" value={me.profile.position} /><ProfileRow label="ຝ່າຍ" value={me.profile.division} /><ProfileRow label="ພະແນກ" value={me.profile.department} /><ProfileRow label="ໜ່ວຍງານ" value={me.profile.unit} /><ProfileRow label="ເບີໂທ" value={me.profile.mobile} /><ProfileRow label="ອີເມວ" value={me.profile.email} /><ProfileRow label="ວັນເລີ່ມວຽກ" value={me.profile.hireDate ? fmtDate(me.profile.hireDate) : null} />
         <div className="mt-4 grid grid-cols-2 gap-3">
@@ -146,13 +158,13 @@ export function EmployeeApp({
       </Section>}
     </main>
 
-    <nav className="fixed inset-x-0 bottom-0 z-10 mx-auto grid max-w-md grid-cols-4 border-t border-slate-200 bg-white px-1 pb-[env(safe-area-inset-bottom)] shadow-lg md:static md:mt-6 md:max-w-3xl md:rounded-2xl md:border md:shadow-sm">
-      {([['HOME','ໜ້າຫຼັກ','⌂'],['LEAVE','ການລາ','▣'],['TRIP','Trip','⇄'],['PROFILE','ຂໍ້ມູນ','○']] as [AppTab,string,string][]).map(([key,label,icon]) => <button key={key} onClick={() => setTab(key)} className={`py-2 text-center ${tab === key ? "text-emerald-700" : "text-slate-400"}`}><span className="block text-lg leading-5">{icon}</span><span className="text-[10px]">{label}</span></button>)}
+    <nav className="fixed inset-x-0 bottom-0 z-10 mx-auto grid max-w-md grid-cols-5 border-t border-slate-200 bg-white px-1 pb-[env(safe-area-inset-bottom)] shadow-lg md:static md:mt-6 md:max-w-3xl md:rounded-2xl md:border md:shadow-sm">
+      {([['HOME','ໜ້າຫຼັກ','⌂'],['LEAVE','ການລາ','▣'],['TRIP','Trip','⇄'],['KB','ຄວາມຮູ້','📖'],['PROFILE','ຂໍ້ມູນ','○']] as [AppTab,string,string][]).map(([key,label,icon]) => <button key={key} onClick={() => setTab(key)} className={`relative py-2 text-center ${tab === key ? "text-emerald-700" : "text-slate-400"}`}><span className="block text-lg leading-5">{icon}</span><span className="text-[10px]">{label}</span>{key === 'KB' && me.knowledge.pendingAck > 0 && <span className="absolute right-1/4 top-1 h-2 w-2 rounded-full bg-rose-500" />}</button>)}
     </nav>
   </div>;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) { return <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:p-6"><h2 className="mb-4 font-semibold">{title}</h2>{children}</section>; }
+function Section({ title, children }: { title?: string; children: React.ReactNode }) { return <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:p-6">{title ? <h2 className="mb-4 font-semibold">{title}</h2> : null}{children}</section>; }
 function QuickCard({ label, value, onClick }: { label: string; value: string; onClick: () => void }) { return <button onClick={onClick} className="rounded-xl bg-white p-3 text-left shadow-sm ring-1 ring-slate-200 hover:ring-emerald-300"><span className="block text-lg font-semibold text-emerald-700">{value}</span><span className="text-[11px] text-slate-500">{label}</span></button>; }
 function ListEmpty({ when, text }: { when: boolean; text: string }) { return when ? <p className="py-8 text-center text-sm text-slate-400">{text}</p> : null; }
 function ListRow({ title, subtitle, status }: { title: string; subtitle: string; status: string }) { const good = status === "APPROVED" || status === "PAID" || status === "CLOSED"; const bad = status === "REJECTED" || status === "CANCELLED"; return <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3"><div><p className="text-sm font-medium">{title}</p><p className="text-xs text-slate-500">{subtitle}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${good ? "bg-emerald-100 text-emerald-700" : bad ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{STATUS_LABEL[status] ?? status}</span></div>; }
@@ -294,6 +306,183 @@ function ApprovalInbox({ approvals, idToken, onChanged }: { approvals: LinkedMe[
       </div>)}
     </div>
   </div>;
+}
+
+type KbListItem = { id: string; title: string; excerpt: string; category: string | null; tags: string[]; version: number; attachmentCount: number; updatedAt: string; ackPending: boolean };
+type KbArticle = { id: string; title: string; summary: string | null; body: string; tags: string[]; version: number; category: string | null; publishedAt: string | null; updatedAt: string; requiresAck: boolean; needsAck: boolean; ackedVersion: number | null; canDownload: boolean; attachments: { id: string; name: string; size: string; url: string }[] };
+
+/**
+ * ຄັງຄວາມຮູ້ ໃນແອັບພະນັກງານ — ອ່ານ + ກົດຮັບຮູ້ ເທົ່ານັ້ນ.
+ *
+ * ດຶງລາຍການຕອນເປີດແທັບ (ບໍ່ຕິດມາກັບ /api/attendance/me ເພື່ອບໍ່ໃຫ້ payload ໜັກ)
+ * ແລະ ດຶງເນື້ອໃນເຕັມສະເພາະຕອນເປີດບົດ. ໃຊ້ renderer ອັນດຽວກັນກັບເວັບ (markdown.ts)
+ * ຈຶ່ງໜ້າຕາຂອງເນື້ອໃນຄືກັນທັງສອງບ່ອນ.
+ */
+function KnowledgeTab({ idToken, onAcked }: { idToken?: string; onAcked: () => Promise<void> }) {
+  const [items, setItems] = useState<KbListItem[] | null>(null);
+  const [categories, setCategories] = useState<{ id: string; name: string; count: number }[]>([]);
+  const [category, setCategory] = useState("");
+  const [term, setTerm] = useState("");
+  const [article, setArticle] = useState<KbArticle | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const post = useCallback(
+    async (body: Record<string, unknown>) => {
+      const response = await fetch("/api/employee-app/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, ...(idToken ? { idToken } : {}) }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(employeeAppError(result.error));
+      return result;
+    },
+    [idToken],
+  );
+
+  // ⚠ ຢ່າ setState ກ່ອນ await ໃນນີ້ — ຖືກເອີ້ນຈາກ useEffect ແລະ eslint
+  // (react-hooks/set-state-in-effect) ຈະຟ້ອງເລື່ອງ cascading render
+  const load = useCallback(
+    async (q: string, categoryId: string) => {
+      try {
+        const result = await post({ action: "list", q, categoryId });
+        setItems(result.articles as KbListItem[]);
+        setCategories(result.categories);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "ໂຫຼດບໍ່ໄດ້");
+        setItems([]);
+      }
+    },
+    [post],
+  );
+
+  useEffect(() => {
+    // ຮູບແບບດຽວກັນກັບ employee/page.tsx — ເອີ້ນຜ່ານ async IIFE
+    (async () => {
+      await load("", "");
+    })();
+  }, [load]);
+
+  const openArticle = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setArticle((await post({ action: "read", id })) as KbArticle);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ເປີດບົດບໍ່ໄດ້");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const acknowledge = async () => {
+    if (!article) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await post({ action: "ack", id: article.id });
+      setArticle({ ...article, needsAck: false, ackedVersion: article.version });
+      await load(term, category);
+      await onAcked(); // ອັບເດດປ້າຍເຕືອນຢູ່ໜ້າຫຼັກ
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ບັນທຶກບໍ່ໄດ້");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (article) {
+    return (
+      <Section>
+        <button onClick={() => setArticle(null)} className="mb-3 text-sm text-emerald-700">← ກັບໄປລາຍການ</button>
+        <h2 className="text-lg font-semibold">{article.title}</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          {article.category ? `${article.category} · ` : ""}ຮຸ່ນ {article.version} · ອັບເດດ {fmtDate(article.publishedAt ?? article.updatedAt)}
+        </p>
+        {article.tags.length > 0 && <p className="mt-1 text-xs text-slate-400">{article.tags.map((t) => `#${t}`).join(" ")}</p>}
+
+        {error && <p className="mt-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{error}</p>}
+
+        {article.needsAck && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm font-medium text-amber-900">ບົດນີ້ຕ້ອງກົດຮັບຮູ້ຫຼັງອ່ານຈົບ</p>
+            {article.ackedVersion !== null && <p className="mt-1 text-xs text-amber-800">ທ່ານເຄີຍຮັບຮູ້ຮຸ່ນ {article.ackedVersion} — ບົດຖືກປັບປຸງເປັນຮຸ່ນ {article.version}</p>}
+            <button onClick={acknowledge} disabled={busy} className="mt-3 w-full rounded-lg bg-amber-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              {busy ? "ກຳລັງບັນທຶກ..." : `ຮັບຮູ້ຮຸ່ນ ${article.version}`}
+            </button>
+          </div>
+        )}
+        {article.requiresAck && !article.needsAck && (
+          <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">✓ ທ່ານຮັບຮູ້ຮຸ່ນ {article.version} ແລ້ວ</p>
+        )}
+
+        <div className="kb-prose mt-4 text-sm" dangerouslySetInnerHTML={{ __html: renderMarkdown(article.body) }} />
+
+        {article.attachments.length > 0 && (
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <p className="mb-2 text-sm font-semibold">ໄຟລ໌ແນບ</p>
+            {article.canDownload ? (
+              article.attachments.map((f) => (
+                <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" className="mb-2 block rounded-xl border border-slate-200 p-3 text-sm">
+                  <span className="text-emerald-700">{f.name}</span>
+                  <span className="ml-2 text-xs text-slate-400">{f.size}</span>
+                </a>
+              ))
+            ) : (
+              <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                ມີ {article.attachments.length} ໄຟລ໌ແນບ — ເປີດຜ່ານເວັບ HRM ເພື່ອດາວໂຫຼດ
+              </p>
+            )}
+          </div>
+        )}
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="ຄັງຄວາມຮູ້">
+      <form
+        onSubmit={(e) => { e.preventDefault(); void load(term, category); }}
+        className="mb-3 flex gap-2"
+      >
+        <input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="ຄົ້ນຫາຫົວຂໍ້ ຫຼື ເນື້ອໃນ…" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <button className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">ຄົ້ນ</button>
+      </form>
+
+      {categories.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {[{ id: "", name: "ທັງໝົດ", count: 0 }, ...categories].map((c) => (
+            <button
+              key={c.id || "all"}
+              onClick={() => { setCategory(c.id); void load(term, c.id); }}
+              className={`rounded-full px-3 py-1 text-xs ${category === c.id ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}
+            >
+              {c.name}{c.id ? ` (${c.count})` : ""}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {error && <p className="mb-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{error}</p>}
+      {items === null && <p className="py-8 text-center text-sm text-slate-400">ກຳລັງໂຫຼດ...</p>}
+      <ListEmpty when={items !== null && items.length === 0} text={term || category ? "ບໍ່ພົບບົດທີ່ກົງກັບເງື່ອນໄຂ" : "ຍັງບໍ່ມີບົດໃນຄັງ"} />
+
+      {(items ?? []).map((a) => (
+        <button key={a.id} onClick={() => openArticle(a.id)} className="mb-2 block w-full rounded-xl border border-slate-200 p-3 text-left">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-medium">{a.title}</p>
+            {a.ackPending && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[10px] text-amber-700">ຕ້ອງຮັບຮູ້</span>}
+          </div>
+          <p className="mt-1 text-xs text-slate-500">{a.excerpt}</p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            {a.category ? `${a.category} · ` : ""}ຮຸ່ນ {a.version}{a.attachmentCount > 0 ? ` · ໄຟລ໌ ${a.attachmentCount}` : ""} · {fmtDate(a.updatedAt)}
+          </p>
+        </button>
+      ))}
+    </Section>
+  );
 }
 
 function employeeAppError(code: string | undefined): string {
